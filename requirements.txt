@@ -8,5 +8,5 @@ python-sdk/bedrock_runtime-0.0.1-py3-none-any.whl
 python-sdk/aws_sdk_signers-0.0.2-py3-none-any.whl 
 boto3==1.37.17
 streamlit==1.43.2
-numpy
-scipy
+numpy==2.2.4
+scipy==1.15.2
