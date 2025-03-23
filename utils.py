@@ -25,7 +25,12 @@ def audio_raw_base64_to_wav(base64_str):
     )
     # Combine WAV header with LPCM data
     wav_audio = wav_header + audio_bytes
-    return wav_audio
+
+    duration_s = 0
+    with wave.open(io.BytesIO(wav_audio), 'rb') as wav_file:
+        duration_s =  wav_file.getnframes()/float(wav_file.getframerate())
+
+    return wav_audio, duration_s
 
 def audio_wav_to_raw(audio_bytes):
     # Read the audio data from the bytes

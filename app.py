@@ -2,53 +2,95 @@ import streamlit as st
 import asyncio
 from s2s_session_manager import S2sSessionManager
 import utils
+import time
+import logging
+
+# Configure logging
+logging.basicConfig(
+    level=logging.DEBUG,  # Set the logging level
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.FileHandler("s2s-session-manager.log"),  # Log to a file
+        logging.StreamHandler()  # Log to the console
+    ]
+)
 
 # Streamlit App
 st.title("Amazon Nova Sonic (speech to speech)")
+st.session_state["response_content"] = {}
+
+async def main():
+    s2s = S2sSessionManager()
+    started = await s2s.session_start()
+    if st.button("Disconnect"):
+        await s2s.session_end()
+    if started:
+        st.success("S2S session started", icon="✅")
+        placeholder = st.empty()
+        with placeholder.container():
+            st.header("Record an audio")
+            audio_value = st.audio_input("Click the record icon to start recording, and stop it to send your voice to Nova.")
+            if audio_value:
+                received_messages, percent_complete, response_content = [], 0, {}
+        
+                progress_text = "Sending audio chunks"
+                sent_audio = st.progress(0, text=progress_text)
+                for percent_complete in range(100):
+                    time.sleep(0.01)
+                    sent_audio.progress(percent_complete + 1, text=progress_text)
+                time.sleep(1)
+                sent_audio.empty()
+
+                # Create empty placeholders to update the UI dynamically
+                st.subheader("Receiving")
+                display_received = st.empty()  # For sent chunks
+
+                # Convert the audio to S2S required format
+                converted_audio = utils.audio_wav_to_raw(audio_value.read())
+
+                await s2s.audio_start()
+
+                # Convert audio to bytes chunks each up to 1024 bytes
+                chunks = [converted_audio[i:i + s2s.chunk_size] for i in range(0, len(converted_audio), s2s.chunk_size)]
+                # Send chunks
+                counter = 0
+                for chunk in chunks:
+                    counter += 1
+                    await s2s.send_audio_chunk(chunk)
+                    percent_complete = counter/len(chunks)
+
+                await s2s.audio_end()
+
+                async for value in s2s.listener():
+                    if "contentStart" in value:
+                        content_id = value["contentStart"].get("contentId")
+                        type = value["contentStart"].get("type")
+                        if type == "AUDIO":
+                            response_content[content_id] = {"content": ""}
+
+                    elif "textOutput" in value:
+                        received_messages.append(f'[{value["textOutput"]["role"]}] {value["textOutput"]["content"]}')
+                        display_received.write('\n\n'.join(received_messages))
+
+                    elif "audioOutput" in value:
+                        content_id = value["audioOutput"].get("contentId")
+                        if content_id in response_content:
+                            response_content[content_id]["content"] += value["audioOutput"]["content"]
+                        else:
+                            response_content[content_id] = {
+                                "content": value["audioOutput"]["content"]
+                            }
+
+                    elif "contentEnd" in value:
+                        content_id = value["contentEnd"].get("contentId")
+                        type = value["contentEnd"].get("type")
+                        if content_id in response_content and type == "AUDIO":
+                            response_audio, duration_s = utils.audio_raw_base64_to_wav(response_content[content_id]["content"])
+                            if response_audio:
+                                st.audio(response_audio, format="audio/wav", autoplay=True)
+                                time.sleep(duration_s)
 
 
-st.header("Record an audio")
-audio_value = st.audio_input("Record a voice message")
-
-# init S2S session
-s2s = S2sSessionManager()
-if s2s.is_connected:
-    st.caption("Connected to S2S")
-
-#with open("./japan16k.raw", 'rb') as f:
-    #converted_audio = f.read()
-if audio_value:
-    st.caption("Sending audio to Nova")
-    received_messages = []
-
-    col1, col2 = st.columns(2)
-    with col1:
-        # Create empty placeholders to update the UI dynamically
-        st.subheader("Receiving")
-        display_received = st.empty()  # For sent chunks
-    with col2:
-        st.subheader("Sending")    
-        display_sent = st.empty()
-
-    # Convert the audio
-    converted_audio = utils.audio_wav_to_raw(audio_value.read())
-
-    async def send_audio(audio_value):
-        await s2s.start_session()
-        await s2s.send_audio(audio_value)
-        async for value in s2s.listener():
-            if "type" in value and value["type"] == "TEXT":
-                received_messages.append(f'[{value["role"]}] {value["content"]}')
-                if value["role"] == "USER":
-                    display_received.write('\n\n'.join(received_messages))
-                else:
-                    st.caption(f'[{value["role"]}] {value["content"]}')
-            elif "type" in value and value["type"] == "AUDIO":
-                #print(f'\033[32m{value["content"]}')
-                response_audio = utils.audio_raw_base64_to_wav(value["content"])
-                if response_audio:
-                    st.audio(response_audio, format="audio/wav")
-            #print(f'\033[33m{value}')
 
 
-    asyncio.run(send_audio(converted_audio))#.read()))
+asyncio.run(main())
