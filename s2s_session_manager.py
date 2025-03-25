@@ -1,188 +1,163 @@
-from bedrock_runtime.client import (
-    BedrockRuntime,
-    InvokeModelWithBidirectionalStreamInput,
-    InvokeModelWithBidirectionalStreamOutput
-)
-from bedrock_runtime.models import InvokeModelWithBidiStreamInputChunk, BidiInputPayloadPart
-from bedrock_runtime.config import Config
-from smithy_aws_core.credentials_resolvers.environment import EnvironmentCredentialsResolver
-from bedrock_runtime.config import HTTPAuthSchemeResolver, SigV4AuthScheme
-
+import os
 import asyncio
 import base64
 import json
 import uuid
-import time
-from datetime import datetime
+import pyaudio
+from bedrock_runtime.client import BedrockRuntime, InvokeModelWithBidirectionalStreamInput
+from bedrock_runtime.models import InvokeModelWithBidiStreamInputChunk, BidiInputPayloadPart
+from bedrock_runtime.config import Config, HTTPAuthSchemeResolver, SigV4AuthScheme
+from smithy_aws_core.credentials_resolvers.environment import EnvironmentCredentialsResolver
 from s2s_events import S2sEvent
-import boto3
-import kb
+from datetime import datetime 
 import logging
 
+# Configure logging
+logging.basicConfig(
+    level=logging.DEBUG,  # Set the logging level
+    format="%(asctime)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.FileHandler("s2s-session-manager.log"),  # Log to a file
+        logging.StreamHandler()  # Log to the console
+    ]
+)
 
-'''
-# S2sManager initialization input schema
-'''
+# Audio configuration
+SAMPLE_RATE = 16000
+CHANNELS = 1
+FORMAT = pyaudio.paInt16
+CHUNK_SIZE = 1024
+
 class S2sSessionManager:
-  chunk_size = 1024
-  reponse_content = {}
-  
-  region = "us-east-1"
-  model_id = "ermis"
-
-  # S2S configuration
-  inference_config = None
-  system_prompt = None
-  audio_input_config = None
-  audio_output_config = None
-  tool_config = None
-
-  text_content_name = None
-  audio_content_name = None
-  tool_content_name = None
-  session = None
-  is_connected = False
-
-  def __init__(self, model_id=None, region=None, inference_config=None, system_prompt=None, audio_input_config=None, audio_output_config=None, tool_config=None):
-    if model_id:
-      self.model_id = model_id
-    if region:
-      self.region = region
-
-    self.inference_config = inference_config if inference_config else S2sEvent.DEFAULT_INFER_CONFIG
-    self.system_prompt = system_prompt if system_prompt else S2sEvent.DEFAULT_SYSTEM_PROMPT
-    self.audio_input_config = audio_input_config if audio_input_config else S2sEvent.DEFAULT_AUDIO_INPUT_CONFIG
-    self.audio_output_config = audio_output_config if audio_output_config else S2sEvent.DEFAULT_AUDIO_OUTPUT_CONFIG
-    self.tool_config = tool_config if tool_config else S2sEvent.DEFAULT_TOOL_CONFIG
-
-    self.prompt_name = str(uuid.uuid4()) 
-    self.text_content_name = str(uuid.uuid4())
-    self.audio_content_name = str(uuid.uuid4())
-    self.tool_content_name = str(uuid.uuid4())
-    # self.prompt_name = "126680f5-5859-4d15-ae70-488de4146484"
-    # self.text_content_name = "a6431ef2-e23c-4f8c-a552-3f308629d3c3"
-    # self.audio_content_name = "b3917935-2398-4889-94a8-e677f6c3e351"
-    # self.tool_content_name = "b3917935-2398-4889-94a8-e677f6c3e351"
+    def __init__(self, model_id='ermis', region='us-east-1'):
+        self.model_id = model_id
+        self.region = region
+        self.client = None
+        self.stream = None
+        self.is_active = False
+        self.prompt_name = str(uuid.uuid4())
+        self.content_name = str(uuid.uuid4())
+        self.audio_content_name = str(uuid.uuid4())
+        self.response_event_queue = asyncio.Queue()
+        
+    def _initialize_client(self):
+        """Initialize the Bedrock client."""
+        config = Config(
+            endpoint_uri=f"https://bedrock-runtime.{self.region}.amazonaws.com",
+            region=self.region,
+            aws_credentials_identity_resolver=EnvironmentCredentialsResolver(),
+            http_auth_scheme_resolver=HTTPAuthSchemeResolver(),
+            http_auth_schemes={"aws.auth#sigv4": SigV4AuthScheme()}
+        )
+        self.client = BedrockRuntime(config=config)
     
-    self.bedrock = BedrockRuntime(config=Config(
-        endpoint_uri=f"https://bedrock-runtime.{self.region}.amazonaws.com",
-        region=self.region,
-        aws_credentials_identity_resolver=EnvironmentCredentialsResolver(),
-        http_auth_scheme_resolver=HTTPAuthSchemeResolver(),
-        http_auth_schemes={"aws.auth#sigv4": SigV4AuthScheme()}
-    ))
-    self.bedrock_agent = boto3.client('bedrock-agent-runtime',region_name=self.region) 
-      
-  async def session_start(self):
-    logging.debug("Session starting")
-    try:
-      # Connect to S2S
-      self.session = await self.bedrock.invoke_model_with_bidirectional_stream(
-          InvokeModelWithBidirectionalStreamInput(model_id=self.model_id)
-      )
-      # Send init events
-      start_events = [
-          S2sEvent.session_start(self.inference_config), 
-          S2sEvent.prompt_start(self.prompt_name, self.audio_output_config, self.tool_config),
-          S2sEvent.content_start_text(self.prompt_name, content_name=self.text_content_name),
-          S2sEvent.text_input(self.prompt_name, self.text_content_name, self.system_prompt),
-          S2sEvent.content_end(self.prompt_name, self.text_content_name),
-        ]
-      for event in start_events:
-        await self.send_raw_event(event)
-      self.is_connected = True
-    except Exception as ex:
-       logging.error("Exception",ex)
-       return False
-    logging.info(f"Session started")
-    return True
-
-  async def listener(self):
-      while self.is_connected:
-        response = await self.session.await_output()
-        for chunk in response:
-          if isinstance(chunk, InvokeModelWithBidirectionalStreamOutput):
-              continue
-          
-          event = None
-          try:
-            ebytes = await chunk.receive()
-            event_str = ebytes.value.bytes_.decode("utf-8")
-            event = json.loads(event_str)
-            logging.debug(f'\033[33m{event}')
-          except Exception as ex:
-            logging.debug(f"\033[31m{ex}") # Red
-            continue
-
-          # Return textOutput, contentStart/contentEnd for audio, audioOutput
-          if "event" in event:
-            evt = event["event"]
-            evt["timestamp"] = datetime.now().timestamp()
-            if "contentStart" in evt:
-               yield evt
-            elif "contentEnd" in evt:
-               yield evt
-            elif "textOutput" in evt:
-               yield evt
-            elif "audioOutput" in evt:
-               yield evt
-            elif "toolUse" in evt:
-                content_id = evt["toolUse"].get("contentId")
-                tool_name = evt["toolUse"].get("toolName")
-                tool_use_id = evt["toolUse"].get("toolUseId")
-                content = json.loads(evt["toolUse"].get("content"))
-                #logging.debug("!!!!",content)
-                if tool_use_id:
-                  # Get history
-                  #logging.debug(self.reponse_content[content_id])
-                  content = self.__handle_tool_use(tool_name, "What are the scaling laws?")
-                  if content:
-                    tool_input = S2sEvent.text_input_tool(self.prompt_name, self.tool_content_name, '\n'.join(content))
-                    events = [
-                      S2sEvent.content_start_tool(self.prompt_name, self.tool_content_name, tool_use_id),
-                      tool_input,
-                      S2sEvent.content_end(self.prompt_name, self.tool_content_name)
-                    ]
-                    # send event back to s2s
-                    for event in events:
-                      await self.send_raw_event(event)
-
-  def __handle_tool_use(self, tool_name, input):
-    return kb.retrieve_and_generation(input)
-
-  async def session_end(self):
-      stop_events = [
-         S2sEvent.content_end(self.prompt_name, self.audio_content_name), 
-         S2sEvent.prompt_end(self.prompt_name),
-         S2sEvent.session_end()
-        ]
-      for event in stop_events:
-        await self.send_raw_event(event)
+    async def send_event(self, evt):
+        """Send an event to the stream."""
+        event = InvokeModelWithBidiStreamInputChunk(
+            value=BidiInputPayloadPart(bytes_=json.dumps(evt).encode('utf-8'))
+        )
+        await self.stream.input_stream.send(event)
+        logging.debug(">>>>>>" + json.dumps(evt))
     
-      self.session = None
-      self.is_connected = False
-
-  async def send_raw_event(self, event):
-    if "audioInput" not in event["event"]:
-      logging.debug(json.dumps(event))
-    else:
-      logging.debug(json.dumps(event)[0:150])
-    await self.session.input_stream.send(InvokeModelWithBidiStreamInputChunk(
-              value=BidiInputPayloadPart(bytes_=json.dumps(event).encode('utf-8'))
-          ))
-
-  async def audio_start(self):
-    logging.debug("Audio starting")
-    await self.send_raw_event(S2sEvent.content_start_audio(self.prompt_name, self.audio_content_name, self.audio_input_config))
-    logging.info(f"Audio started")
-
-  async def audio_end(self):
-    logging.debug("Audio ending")
-    await self.send_raw_event(S2sEvent.content_end(self.prompt_name, self.audio_content_name))
-    logging.info(f"Audio ended")
-
-  async def send_audio_chunk(self, chunk):
-      blob = base64.b64encode(chunk)
-      audio_event = S2sEvent.audio_input(self.prompt_name, self.audio_content_name, blob.decode('utf-8'))
-      await self.send_raw_event(audio_event)
-      
+    async def start_session(self):
+        """Start a new session with Nova S2S."""
+        if not self.client:
+            self._initialize_client()
+            
+        # Initialize the stream
+        self.stream = await self.client.invoke_model_with_bidirectional_stream(
+            InvokeModelWithBidirectionalStreamInput(model_id=self.model_id)
+        )
+        self.is_active = True
+        
+        # Send session start event
+        await self.send_event(S2sEvent.session_start())
+        
+        # Send prompt start event
+        await self.send_event(S2sEvent.prompt_start(self.prompt_name))
+        
+        # Send system prompt
+        await self.send_event(S2sEvent.content_start_text(self.prompt_name, self.content_name))
+        
+        system_prompt = "You are a helpful assistant. Keep responses brief and conversational."
+        await self.send_event(S2sEvent.text_input(self.prompt_name, self.content_name, system_prompt))
+        
+        await self.send_event(S2sEvent.content_end(self.prompt_name, self.content_name))
+        
+        # Start processing responses
+        asyncio.create_task(self._process_responses())
+        logging.debug("Session started")
+    
+    async def start_audio_input(self):
+        """Start audio input stream."""
+        await self.send_event(S2sEvent.content_start_audio(self.prompt_name, self.audio_content_name))
+    
+    async def send_audio_chunk(self, audio_base64):
+        """Send an audio chunk to the stream."""
+        if not self.is_active:
+            return
+            
+        event = S2sEvent.audio_input(self.prompt_name, self.audio_content_name, audio_base64)
+        await self.send_event(event)
+    
+    async def end_audio_input(self):
+        """End audio input stream."""
+        await self.send_event(S2sEvent.content_end(self.prompt_name, self.audio_content_name))
+    
+    async def end_session(self):
+        """End the session."""
+        if not self.is_active:
+            return
+            
+        await self.send_event(S2sEvent.prompt_end(self.prompt_name))
+        await self.send_event(S2sEvent.session_end())
+        
+        self.is_active = False
+        await self.stream.input_stream.close()
+    
+    async def _process_responses(self):
+        logging.debug("start receiving")
+        """Process responses from the stream."""
+        try:
+            while self.is_active:
+                output = await self.stream.await_output()
+                result = await output[1].receive()
+                
+                if result.value and result.value.bytes_:
+                    response_data = result.value.bytes_.decode('utf-8')
+                    event = json.loads(response_data)
+                    logging.debug("<<<<<<" + json.dumps(event))
+                    
+                    if "event" in event:
+                        evt = event["event"]
+                        evt["timestamp"] = datetime.now().timestamp()
+                        if "contentStart" in evt:
+                            await self.response_event_queue.put(evt)
+                        elif "contentEnd" in evt:
+                            await self.response_event_queue.put(evt)
+                        elif "textOutput" in evt:
+                            await self.response_event_queue.put(evt)
+                        elif "audioOutput" in evt:
+                            await self.response_event_queue.put(evt)
+                        elif "toolUse" in evt:
+                            content_id = evt["toolUse"].get("contentId")
+                            tool_name = evt["toolUse"].get("toolName")
+                            tool_use_id = evt["toolUse"].get("toolUseId")
+                            content = json.loads(evt["toolUse"].get("content"))
+                            #logging.debug("!!!!",content)
+                            if tool_use_id:
+                                # Get history
+                                #logging.debug(self.reponse_content[content_id])
+                                content = self.__handle_tool_use(tool_name, "What are the scaling laws?")
+                                if content:
+                                    tool_input = S2sEvent.text_input_tool(self.prompt_name, self.tool_content_name, '\n'.join(content))
+                                    events = [
+                                    S2sEvent.content_start_tool(self.prompt_name, self.tool_content_name, tool_use_id),
+                                    tool_input,
+                                    S2sEvent.content_end(self.prompt_name, self.tool_content_name)
+                                    ]
+                                    # send event back to s2s
+                                    for event in events:
+                                        await self.send_event(event)
+        except Exception as e:
+            print(f"Error processing responses: {e}")
