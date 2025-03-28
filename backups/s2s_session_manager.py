@@ -4,11 +4,11 @@ import base64
 import json
 import uuid
 import pyaudio
-from bedrock_runtime.client import BedrockRuntime, InvokeModelWithBidirectionalStreamInput
+from bedrock_runtime.client import BedrockRuntime, InvokeModelWithBidirectionalStreamInput, InvokeModelWithBidirectionalStreamOutput
 from bedrock_runtime.models import InvokeModelWithBidiStreamInputChunk, BidiInputPayloadPart
 from bedrock_runtime.config import Config, HTTPAuthSchemeResolver, SigV4AuthScheme
 from smithy_aws_core.credentials_resolvers.environment import EnvironmentCredentialsResolver
-from s2s_events import S2sEvent
+from server.s2s_events import S2sEvent
 from datetime import datetime 
 import logging
 
@@ -22,11 +22,6 @@ logging.basicConfig(
     ]
 )
 
-# Audio configuration
-SAMPLE_RATE = 16000
-CHANNELS = 1
-FORMAT = pyaudio.paInt16
-CHUNK_SIZE = 1024
 
 class S2sSessionManager:
     def __init__(self, model_id='ermis', region='us-east-1'):
@@ -53,11 +48,12 @@ class S2sSessionManager:
     
     async def send_event(self, evt):
         """Send an event to the stream."""
-        event = InvokeModelWithBidiStreamInputChunk(
-            value=BidiInputPayloadPart(bytes_=json.dumps(evt).encode('utf-8'))
-        )
-        await self.stream.input_stream.send(event)
-        logging.debug(">>>>>>" + json.dumps(evt))
+        if self.is_active:
+            event = InvokeModelWithBidiStreamInputChunk(
+                value=BidiInputPayloadPart(bytes_=json.dumps(evt).encode('utf-8'))
+            )
+            await self.stream.input_stream.send(event)
+            logging.debug(">>>>>>" + json.dumps(evt))
     
     async def start_session(self):
         """Start a new session with Nova S2S."""
@@ -121,43 +117,59 @@ class S2sSessionManager:
         try:
             while self.is_active:
                 output = await self.stream.await_output()
-                result = await output[1].receive()
-                
-                if result.value and result.value.bytes_:
-                    response_data = result.value.bytes_.decode('utf-8')
-                    event = json.loads(response_data)
-                    logging.debug("<<<<<<" + json.dumps(event))
-                    
-                    if "event" in event:
-                        evt = event["event"]
-                        evt["timestamp"] = datetime.now().timestamp()
-                        if "contentStart" in evt:
-                            await self.response_event_queue.put(evt)
-                        elif "contentEnd" in evt:
-                            await self.response_event_queue.put(evt)
-                        elif "textOutput" in evt:
-                            await self.response_event_queue.put(evt)
-                        elif "audioOutput" in evt:
-                            await self.response_event_queue.put(evt)
-                        elif "toolUse" in evt:
-                            content_id = evt["toolUse"].get("contentId")
-                            tool_name = evt["toolUse"].get("toolName")
-                            tool_use_id = evt["toolUse"].get("toolUseId")
-                            content = json.loads(evt["toolUse"].get("content"))
-                            #logging.debug("!!!!",content)
-                            if tool_use_id:
-                                # Get history
-                                #logging.debug(self.reponse_content[content_id])
-                                content = self.__handle_tool_use(tool_name, "What are the scaling laws?")
-                                if content:
-                                    tool_input = S2sEvent.text_input_tool(self.prompt_name, self.tool_content_name, '\n'.join(content))
-                                    events = [
-                                    S2sEvent.content_start_tool(self.prompt_name, self.tool_content_name, tool_use_id),
-                                    tool_input,
-                                    S2sEvent.content_end(self.prompt_name, self.tool_content_name)
-                                    ]
-                                    # send event back to s2s
-                                    for event in events:
-                                        await self.send_event(event)
+                try:
+                    for chunk in output:
+                        if isinstance(output, InvokeModelWithBidirectionalStreamOutput):
+                            continue
+
+                        event = None
+                        try:
+                            ebytes = await chunk.receive()
+                            event_str = ebytes.value.bytes_.decode("utf-8")
+                            result = json.loads(event_str)
+                        except Exception as ex:
+                            logging.debug(ex) # Red
+                            continue
+
+                        #result = await output[1].receive()
+                        
+                        if result.value and result.value.bytes_:
+                            response_data = result.value.bytes_.decode('utf-8')
+                            event = json.loads(response_data)
+                            logging.debug("<<<<<<" + json.dumps(event))
+                            
+                            if "event" in event:
+                                evt = event["event"]
+                                evt["timestamp"] = datetime.now().timestamp()
+                                if "contentStart" in evt:
+                                    await self.response_event_queue.put(evt)
+                                elif "contentEnd" in evt:
+                                    await self.response_event_queue.put(evt)
+                                elif "textOutput" in evt:
+                                    await self.response_event_queue.put(evt)
+                                elif "audioOutput" in evt:
+                                    await self.response_event_queue.put(evt)
+                                elif "toolUse" in evt:
+                                    content_id = evt["toolUse"].get("contentId")
+                                    tool_name = evt["toolUse"].get("toolName")
+                                    tool_use_id = evt["toolUse"].get("toolUseId")
+                                    content = json.loads(evt["toolUse"].get("content"))
+                                    #logging.debug("!!!!",content)
+                                    if tool_use_id:
+                                        # Get history
+                                        #logging.debug(self.reponse_content[content_id])
+                                        content = self.__handle_tool_use(tool_name, "What are the scaling laws?")
+                                        if content:
+                                            tool_input = S2sEvent.text_input_tool(self.prompt_name, self.tool_content_name, '\n'.join(content))
+                                            events = [
+                                            S2sEvent.content_start_tool(self.prompt_name, self.tool_content_name, tool_use_id),
+                                            tool_input,
+                                            S2sEvent.content_end(self.prompt_name, self.tool_content_name)
+                                            ]
+                                            # send event back to s2s
+                                            for event in events:
+                                                await self.send_event(event)
+                except Exception as ex:
+                    logging.debug(f"Failed to receive message from s2s: {ex}")
         except Exception as e:
             print(f"Error processing responses: {e}")

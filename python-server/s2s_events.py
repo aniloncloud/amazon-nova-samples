@@ -22,7 +22,7 @@ class S2sEvent:
           "sampleRateHertz": 24000,
           "sampleSizeBits": 16,
           "channelCount": 1,
-          "voiceId": "en_us_matthew",
+          "voiceId": "matthew",
           "encoding": "base64",
           "audioType": "SPEECH"
         }
@@ -43,13 +43,26 @@ class S2sEvent:
                   }
                 ]
         }
+  BYOLLM_TOOL_CONFIG = {
+    "tools": [{
+                        "toolSpec": {
+                            "name": "lookup",
+                            "description": "Runs query against a knowledge base to retrieve information.",
+                            "inputSchema": {
+                                "json": "{\"$schema\":\"http://json-schema.org/draft-07/schema#\",\"type\":\"object\",\"properties\":{\"query\":{\"type\":\"string\",\"description\":\"the query to search\"}},\"required\":[\"query\"]}"
+                            }
+                        }
+                    }
+    ]}
 
   @staticmethod
   def session_start(inference_config=DEFAULT_INFER_CONFIG): 
     return {"event":{"sessionStart":{"inferenceConfiguration":inference_config}}}
 
   @staticmethod
-  def prompt_start(prompt_name, audio_output_config=DEFAULT_AUDIO_OUTPUT_CONFIG, tool_config=DEFAULT_TOOL_CONFIG):
+  def prompt_start(prompt_name, 
+                   audio_output_config=DEFAULT_AUDIO_OUTPUT_CONFIG, 
+                   tool_config=BYOLLM_TOOL_CONFIG):
     return {
           "event": {
             "promptStart": {
