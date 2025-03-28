@@ -5,6 +5,7 @@ import base64
 import warnings
 import uuid
 from s2s_events import S2sEvent
+import argparse
 
 from bedrock_runtime.client import BedrockRuntime, InvokeModelWithBidirectionalStreamInput
 from bedrock_runtime.models import InvokeModelWithBidiStreamInputChunk, BidiInputPayloadPart
@@ -339,15 +340,15 @@ async def forward_responses(websocket, stream_manager):
         print(f"Error forwarding responses: {e}")
 
 
-async def main(debug=False):
+async def main(host="localhost", port=8081, debug=False):
     """Main function to run the WebSocket server."""
     global DEBUG
     DEBUG = debug
     
     try:
         # Start WebSocket server
-        async with websockets.serve(websocket_handler, "localhost", 8081):
-            print(f"WebSocket server started at ws://localhost:8081")
+        async with websockets.serve(websocket_handler, host, port):
+            print(f"WebSocket server started at ws://{host}:{port}")
             
             # Keep the server running forever
             await asyncio.Future()
@@ -358,12 +359,14 @@ if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(description='Nova S2S WebSocket Server')
+    parser.add_argument('--host', type=str, help='Host name, default localhost')
+    parser.add_argument('--port', type=int, help='Host port, default 8081')
     parser.add_argument('--debug', action='store_true', help='Enable debug mode')
     args = parser.parse_args()
     
     # Run the main function
     try:
-        asyncio.run(main(debug=args.debug))
+        asyncio.run(main(host=args.host, port=args.port, debug=args.debug))
     except KeyboardInterrupt:
         print("Server stopped by user")
     except Exception as e:
