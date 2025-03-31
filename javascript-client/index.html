@@ -73,8 +73,8 @@
     static DEFAULT_TOOL_CONFIG = {
       tools: [{
         toolSpec: {
-          name: "getTimeTool",
-          description: "get information about the current time",
+          name: "getDateTool",
+          description: "get information about the current day",
           inputSchema: {
             json: JSON.stringify({
               "$schema": "http://json-schema.org/draft-07/schema#",
@@ -84,7 +84,46 @@
             })
           }
         }
-      }]
+      },
+      {
+        toolSpec: {
+          name: "getKbTool",
+          description: "get information about the Amazon policy",
+          inputSchema: {
+            json: JSON.stringify({
+              "$schema": "http://json-schema.org/draft-07/schema#",
+              type: "object",
+              properties: {
+                query: {
+                  type: "string",
+                  description: "the query to search"
+                }
+              },
+              required: []
+            })
+          }
+        }
+      },
+      {
+        toolSpec: {
+          name: "getTravelPolicyTool",
+          description: "get information about the travel with pet policy",
+          inputSchema: {
+            json: JSON.stringify({
+              "$schema": "http://json-schema.org/draft-07/schema#",
+              type: "object",
+              properties: {
+                query: {
+                  type: "string",
+                  description: "the query to search"
+                }
+              },
+              required: []
+            })
+          }
+        }
+      }
+    ]
     };
   
     static BYOLLM_TOOL_CONFIG = {
@@ -113,7 +152,7 @@
       return { event: { sessionStart: { inferenceConfiguration: inferenceConfig } } };
     }
   
-    static promptStart(promptName, audioOutputConfig = S2sEvent.DEFAULT_AUDIO_OUTPUT_CONFIG, toolConfig = S2sEvent.BYOLLM_TOOL_CONFIG) {
+    static promptStart(promptName, audioOutputConfig = S2sEvent.DEFAULT_AUDIO_OUTPUT_CONFIG, toolConfig = S2sEvent.DEFAULT_TOOL_CONFIG) {
       return {
         event: {
           promptStart: {
@@ -241,6 +280,7 @@
 </script>
 <script>
     // WebSocket connection setup
+    //const wsUrl = 'ws://NovaS2-apigw-IwgwFgdCKov1-246264705.us-east-1.elb.amazonaws.com';
     const wsUrl = 'ws://localhost:8081'; // Replace with your WebSocket URL
     const wsManager = new WebSocket(wsUrl);
 

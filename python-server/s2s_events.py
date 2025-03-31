@@ -29,15 +29,15 @@ class S2sEvent:
   DEFAULT_TOOL_CONFIG = {
           "tools": [{
                       "toolSpec": {
-                          "name": "getTimeTool",
-                          "description": "get information about the current time",
+                          "name": "getDateTool",
+                          "description": "get information about the current day",
                           "inputSchema": {
-                              "json": json.dumps({
-                                "\$schema": "http://json-schema.org/draft-07/schema#",
+                              "json": '''{
+                                "$schema": "http://json-schema.org/draft-07/schema#",
                                 "type": "object",
                                 "properties": {},
                                 "required": []
-                            })
+                            }'''
                           }
                       }
                   }

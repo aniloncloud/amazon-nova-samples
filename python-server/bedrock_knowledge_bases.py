@@ -15,7 +15,7 @@ def retrieve_kb(query):
             }
         },
         retrievalQuery={
-            'text': input
+            'text': query
         }
     )
     if "retrievalResults" in response:
