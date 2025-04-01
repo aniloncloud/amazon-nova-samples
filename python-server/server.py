@@ -7,7 +7,7 @@ import uuid
 from s2s_events import S2sEvent
 from s2s_session_manager import S2sSessionManager
 import argparse
-
+from datetime import datetime
 from bedrock_runtime.client import BedrockRuntime, InvokeModelWithBidirectionalStreamInput
 from bedrock_runtime.models import InvokeModelWithBidiStreamInputChunk, BidiInputPayloadPart
 from bedrock_runtime.config import Config, HTTPAuthSchemeResolver, SigV4AuthScheme
@@ -24,30 +24,40 @@ def debug_print(message):
     if DEBUG:
         print(message)
 
-
 async def websocket_handler(websocket):
-    """Handle WebSocket connections from the frontend."""
-    # Create a new stream manager for this connection
-    stream_manager = S2sSessionManager(model_id='ermis', region='us-east-1')
-    
-    # Initialize the Bedrock stream
-    await stream_manager.initialize_stream()
-    
-    # Start a task to forward responses from Bedrock to the WebSocket
-    forward_task = asyncio.create_task(forward_responses(websocket, stream_manager))
-    
+    stream_manager = None
     try:
         async for message in websocket:
             try:
                 data = json.loads(message)
+                if data.get('type') == 'heartbeat':
+                    # Respond to heartbeat
+                    await websocket.send(json.dumps({
+                        'type': 'heartbeat',
+                        'time': datetime.now().isoformat(),
+                        'status': 'ok'
+                    }))
+                    continue
+
                 if 'body' in data:
                     data = json.loads(data["body"])
                 if 'event' in data:
-                    event_type = list(data['event'].keys())[0]
-                    if event_type == "audioInput":
-                        debug_print(message[0:180])
-                    else:
-                        debug_print(message)
+                    if stream_manager == None:
+                        """Handle WebSocket connections from the frontend."""
+                        # Create a new stream manager for this connection
+                        stream_manager = S2sSessionManager(model_id='ermis', region='us-east-1')
+                        
+                        # Initialize the Bedrock stream
+                        await stream_manager.initialize_stream()
+                        
+                        # Start a task to forward responses from Bedrock to the WebSocket
+                        forward_task = asyncio.create_task(forward_responses(websocket, stream_manager))
+
+                        event_type = list(data['event'].keys())[0]
+                        if event_type == "audioInput":
+                            debug_print(message[0:180])
+                        else:
+                            debug_print(message)
 
                     # Store prompt name and content names if provided
                     if event_type == 'promptStart':

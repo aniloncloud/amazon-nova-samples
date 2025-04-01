@@ -67,5 +67,5 @@ If you've started the WebSocket from the previous step, set WS_URL to ws://local
 
 4. Run
 ```
-npm Start
+npm start
 ```
