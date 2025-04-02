@@ -1,7 +1,7 @@
 import asyncio
 import websockets
 import json
-import base64
+import logging
 import warnings
 import uuid
 from s2s_events import S2sEvent
@@ -12,7 +12,16 @@ from bedrock_runtime.client import BedrockRuntime, InvokeModelWithBidirectionalS
 from bedrock_runtime.models import InvokeModelWithBidiStreamInputChunk, BidiInputPayloadPart
 from bedrock_runtime.config import Config, HTTPAuthSchemeResolver, SigV4AuthScheme
 from smithy_aws_core.credentials_resolvers.environment import EnvironmentCredentialsResolver
+import http.server
+import socketserver
+import threading
+import os
+from http import HTTPStatus
 
+# Configure logging
+LOGLEVEL = os.environ.get("LOGLEVEL", "INFO").upper()
+logging.basicConfig(level=LOGLEVEL, format="%(asctime)s %(message)s")
+logger = logging.getLogger(__name__)
 
 # Suppress warnings
 warnings.filterwarnings("ignore")
@@ -24,21 +33,81 @@ def debug_print(message):
     if DEBUG:
         print(message)
 
+class HealthCheckHandler(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        client_ip = self.client_address[0]
+        logger.info(
+            f"Health check request received from {client_ip} for path: {self.path}"
+        )
+
+        if self.path == "/health" or self.path == "/":
+            logger.info(f"Responding with 200 OK to health check from {client_ip}")
+            self.send_response(HTTPStatus.OK)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            response = json.dumps({"status": "healthy"})
+            self.wfile.write(response.encode("utf-8"))
+            logger.info(f"Health check response sent: {response}")
+        else:
+            logger.info(
+                f"Responding with 404 Not Found to request for {self.path} from {client_ip}"
+            )
+            self.send_response(HTTPStatus.NOT_FOUND)
+            self.end_headers()
+
+    def log_message(self, format, *args):
+        # Override to use our logger instead
+        pass
+
+
+def start_health_check_server():
+    """Start the HTTP health check server on port 80."""
+    health_port = 8082
+    health_host = "0.0.0.0"
+
+    try:
+        # Create the server with a socket timeout to prevent hanging
+        httpd = http.server.HTTPServer((health_host, health_port), HealthCheckHandler)
+        httpd.timeout = 5  # 5 second timeout
+
+        logger.info(f"Starting health check server on {health_host}:{health_port}")
+
+        # Run the server in a separate thread
+        thread = threading.Thread(target=httpd.serve_forever)
+        thread.daemon = (
+            True  # This ensures the thread will exit when the main program exits
+        )
+        thread.start()
+
+        # Verify the server is running
+        logger.info(
+            f"Health check server started at http://{health_host}:{health_port}/health"
+        )
+        logger.info(f"Health check thread is alive: {thread.is_alive()}")
+
+        # Try to make a local request to verify the server is responding
+        try:
+            import urllib.request
+
+            with urllib.request.urlopen(
+                f"http://localhost:{health_port}/health", timeout=2
+            ) as response:
+                logger.info(
+                    f"Local health check test: {response.status} - {response.read().decode('utf-8')}"
+                )
+        except Exception as e:
+            logger.warning(f"Local health check test failed: {e}")
+
+    except Exception as e:
+        logger.error(f"Failed to start health check server: {e}", exc_info=True)
+
+
 async def websocket_handler(websocket):
     stream_manager = None
     try:
         async for message in websocket:
             try:
                 data = json.loads(message)
-                if data.get('type') == 'heartbeat':
-                    # Respond to heartbeat
-                    await websocket.send(json.dumps({
-                        'type': 'heartbeat',
-                        'time': datetime.now().isoformat(),
-                        'status': 'ok'
-                    }))
-                    continue
-
                 if 'body' in data:
                     data = json.loads(data["body"])
                 if 'event' in data:
@@ -116,12 +185,12 @@ async def forward_responses(websocket, stream_manager):
         websocket.close()
         stream_manager.close()
 
+async def main():
+    start_health_check_server()
 
-async def main(host="localhost", port=8081, debug=False):
     """Main function to run the WebSocket server."""
-    global DEBUG
-    DEBUG = debug
-    
+    host = str(os.getenv("HOST", "0.0.0.0"))
+    port = int(os.getenv("PORT", 8081))
     try:
         # Start WebSocket server
         async with websockets.serve(websocket_handler, host, port):
@@ -130,21 +199,17 @@ async def main(host="localhost", port=8081, debug=False):
             # Keep the server running forever
             await asyncio.Future()
     except Exception as ex:
-        print("!!!!",ex)
-        
+        print("Failed to start websocket service",ex)
 
 if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(description='Nova S2S WebSocket Server')
-    parser.add_argument('--host', type=str, help='Host name, default localhost')
-    parser.add_argument('--port', type=int, help='Host port, default 8081')
     parser.add_argument('--debug', action='store_true', help='Enable debug mode')
     args = parser.parse_args()
-    
-    # Run the main function
+
     try:
-        asyncio.run(main(host=args.host, port=args.port, debug=args.debug))
+        asyncio.run(main())
     except KeyboardInterrupt:
         print("Server stopped by user")
     except Exception as e:
