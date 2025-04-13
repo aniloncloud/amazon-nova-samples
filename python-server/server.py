@@ -3,17 +3,9 @@ import websockets
 import json
 import logging
 import warnings
-import uuid
-from s2s_events import S2sEvent
 from s2s_session_manager import S2sSessionManager
 import argparse
-from datetime import datetime
-from bedrock_runtime.client import BedrockRuntime, InvokeModelWithBidirectionalStreamInput
-from bedrock_runtime.models import InvokeModelWithBidiStreamInputChunk, BidiInputPayloadPart
-from bedrock_runtime.config import Config, HTTPAuthSchemeResolver, SigV4AuthScheme
-from smithy_aws_core.credentials_resolvers.environment import EnvironmentCredentialsResolver
 import http.server
-import socketserver
 import threading
 import os
 from http import HTTPStatus
@@ -60,11 +52,8 @@ class HealthCheckHandler(http.server.BaseHTTPRequestHandler):
         pass
 
 
-def start_health_check_server():
+def start_health_check_server(health_host, health_port):
     """Start the HTTP health check server on port 80."""
-    health_port = 8082
-    health_host = "0.0.0.0"
-
     try:
         # Create the server with a socket timeout to prevent hanging
         httpd = http.server.HTTPServer((health_host, health_port), HealthCheckHandler)
@@ -114,7 +103,7 @@ async def websocket_handler(websocket):
                     if stream_manager == None:
                         """Handle WebSocket connections from the frontend."""
                         # Create a new stream manager for this connection
-                        stream_manager = S2sSessionManager(model_id='ermis', region='us-east-1')
+                        stream_manager = S2sSessionManager(model_id='amazon.nova-sonic-v1:0', region='us-east-1')
                         
                         # Initialize the Bedrock stream
                         await stream_manager.initialize_stream()
@@ -157,10 +146,10 @@ async def websocket_handler(websocket):
         print("WebSocket connection closed")
     finally:
         # Clean up
+        await stream_manager.close()
         forward_task.cancel()
         if websocket:
             websocket.close()
-        await stream_manager.close()
 
 
 async def forward_responses(websocket, stream_manager):
@@ -185,16 +174,19 @@ async def forward_responses(websocket, stream_manager):
         websocket.close()
         stream_manager.close()
 
-async def main():
-    start_health_check_server()
+async def main(host, port, health_port):
+
+    if health_port:
+        try:
+            start_health_check_server(host, health_port)
+        except Exception as ex:
+            print("Failed to start health check endpoint",ex)
 
     """Main function to run the WebSocket server."""
-    host = str(os.getenv("HOST", "0.0.0.0"))
-    port = int(os.getenv("PORT", 8081))
     try:
         # Start WebSocket server
         async with websockets.serve(websocket_handler, host, port):
-            print(f"WebSocket server started at ws://{host}:{port}")
+            print(f"WebSocket server started at host:{host}, port:{port}")
             
             # Keep the server running forever
             await asyncio.Future()
@@ -208,12 +200,28 @@ if __name__ == "__main__":
     parser.add_argument('--debug', action='store_true', help='Enable debug mode')
     args = parser.parse_args()
 
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print("Server stopped by user")
-    except Exception as e:
-        print(f"Server error: {e}")
-        if args.debug:
-            import traceback
-            traceback.print_exc()
+    # Environment variables required for host and ports: 
+    # HOST: for both websocket and health check
+    # WS_PORT: websocket port. 8081
+    # HEALTH_PORT (optional): health check HTTP port. 8082
+
+    host, port, health_port = None, None, None
+    if os.getenv("HOST"):
+        host = str(os.getenv("HOST"))
+    if os.getenv("WS_PORT"):
+        port = int(os.getenv("WS_PORT"))
+    if os.getenv("HEALTH_PORT"):
+        health_port = int(os.getenv("HEALTH_PORT"))
+
+    if not host or not port:
+        print(f"HOST and PORT are required. Received HOST: {host}, PORT: {port}")
+    else:
+        try:
+            asyncio.run(main(host, port, health_port))
+        except KeyboardInterrupt:
+            print("Server stopped by user")
+        except Exception as e:
+            print(f"Server error: {e}")
+            if args.debug:
+                import traceback
+                traceback.print_exc()

@@ -1,9 +1,13 @@
 import json
 import boto3
+import os
 
-bedrock_agent_runtime = boto3.client('bedrock-agent-runtime',region_name='us-west-2') 
-KB_ID = 'SUBVC7X1OG'
+KB_ID = os.environ.get('KB_ID')
+KB_REGION = os.environ.get('KB_REGION', 'us-east-1')
+bedrock_agent_runtime = boto3.client('bedrock-agent-runtime', region_name=KB_REGION) 
+
 def retrieve_kb(query):
+    print(query)
     results = []
     # Call KB
     response = bedrock_agent_runtime.retrieve(

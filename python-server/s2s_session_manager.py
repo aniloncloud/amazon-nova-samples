@@ -1,17 +1,14 @@
 import asyncio
-import websockets
 import json
 import base64
 import warnings
 import uuid
 from s2s_events import S2sEvent
-import argparse
-import websockets
 import bedrock_knowledge_bases as kb
 import time
-from bedrock_runtime.client import BedrockRuntime, InvokeModelWithBidirectionalStreamInput
-from bedrock_runtime.models import InvokeModelWithBidiStreamInputChunk, BidiInputPayloadPart
-from bedrock_runtime.config import Config, HTTPAuthSchemeResolver, SigV4AuthScheme
+from aws_sdk_bedrock_runtime.client import BedrockRuntimeClient, InvokeModelWithBidirectionalStreamOperationInput
+from aws_sdk_bedrock_runtime.models import InvokeModelWithBidirectionalStreamInputChunk, BidirectionalInputPayloadPart
+from aws_sdk_bedrock_runtime.config import Config, HTTPAuthSchemeResolver, SigV4AuthScheme
 from smithy_aws_core.credentials_resolvers.environment import EnvironmentCredentialsResolver
 
 # Suppress warnings
@@ -28,7 +25,7 @@ def debug_print(message):
 class S2sSessionManager:
     """Manages bidirectional streaming with AWS Bedrock using asyncio"""
     
-    def __init__(self, model_id='ermis', region='us-east-1'):
+    def __init__(self, model_id='amazon.nova-sonic-v1:0', region='us-east-1'):
         """Initialize the stream manager."""
         self.model_id = model_id
         self.region = region
@@ -38,7 +35,7 @@ class S2sSessionManager:
         self.output_queue = asyncio.Queue()
         
         self.response_task = None
-        self.stream_response = None
+        self.stream = None
         self.is_active = False
         self.bedrock_client = None
         
@@ -59,8 +56,8 @@ class S2sSessionManager:
             http_auth_scheme_resolver=HTTPAuthSchemeResolver(),
             http_auth_schemes={"aws.auth#sigv4": SigV4AuthScheme()}
         )
-        self.bedrock_client = BedrockRuntime(config=config)
-    
+        self.bedrock_client = BedrockRuntimeClient(config=config)
+
     async def initialize_stream(self):
         """Initialize the bidirectional stream with Bedrock."""
         try:
@@ -72,14 +69,15 @@ class S2sSessionManager:
             raise
 
         try:
-            self.stream_response = await self.bedrock_client.invoke_model_with_bidirectional_stream(
-                InvokeModelWithBidirectionalStreamInput(model_id=self.model_id)
+            # Initialize the stream
+            self.stream = await self.bedrock_client.invoke_model_with_bidirectional_stream(
+                InvokeModelWithBidirectionalStreamOperationInput(model_id=self.model_id)
             )
             self.is_active = True
             
             # Start listening for responses
             self.response_task = asyncio.create_task(self._process_responses())
-            
+
             # Start processing audio input
             asyncio.create_task(self._process_audio_input())
             
@@ -96,36 +94,24 @@ class S2sSessionManager:
     async def send_raw_event(self, event_data):
         try:
             """Send a raw event to the Bedrock stream."""
-            if not self.stream_response or not self.is_active:
+            if not self.stream or not self.is_active:
                 debug_print("Stream not initialized or closed")
                 return
             
-            # Convert to JSON string if it's a dict
-            if isinstance(event_data, dict):
-                event_json = json.dumps(event_data)
-            else:
-                event_json = event_data
-            
-            # Create the event chunk
-            event = InvokeModelWithBidiStreamInputChunk(
-                value=BidiInputPayloadPart(bytes_=event_json.encode('utf-8'))
+            event_json = json.dumps(event_data)
+            #if "audioInput" not in event_data["event"]:
+            #    print(event_json)
+            event = InvokeModelWithBidirectionalStreamInputChunk(
+                value=BidirectionalInputPayloadPart(bytes_=event_json.encode('utf-8'))
             )
-        
-            await self.stream_response.input_stream.send(event)
-            if DEBUG:
-                if len(event_json) > 200:
-                    if isinstance(event_data, dict):
-                        event_type = list(event_data.get("event", {}).keys())
-                    else:
-                        event_type = list(json.loads(event_json).get("event", {}).keys())
-                    debug_print(f"Sent event type: {event_type}")
-                else:
-                    debug_print(f"Sent event: {event_json}")
+            await self.stream.input_stream.send(event)
+
+            # Close session
+            if "sessionEnd" in event_data["event"]:
+                self.close()
+            
         except Exception as e:
             debug_print(f"Error sending event: {str(e)}")
-            if DEBUG:
-                import traceback
-                traceback.print_exc()
     
     async def _process_audio_input(self):
         """Process audio input from the queue and send to Bedrock."""
@@ -168,88 +154,96 @@ class S2sSessionManager:
     
     async def _process_responses(self):
         """Process incoming responses from Bedrock."""
-        try:            
-            while self.is_active:
-                try:
-                    output = await self.stream_response.await_output()
-                    result = await output[1].receive()
-                    if result.value and result.value.bytes_:
-                        try:
-                            response_data = result.value.bytes_.decode('utf-8')
-                            json_data = json.loads(response_data)
-                            json_data["timestamp"] = int(time.time() * 1000)  # Milliseconds since epoch
-                            
-                            # Handle different response types
-                            if 'event' in json_data:
-                                # Handle tool use detection
-                                if 'toolUse' in json_data['event']:
-                                    self.toolUseContent = json_data['event']['toolUse']
-                                    self.toolName = json_data['event']['toolUse']['toolName']
-                                    self.toolUseId = json_data['event']['toolUse']['toolUseId']
-                                    debug_print(f"Tool use detected: {self.toolName}, ID: {self.toolUseId}, "+ json.dumps(json_data['event']))
-                                
-                                # Process tool use when content ends
-                                elif 'contentEnd' in json_data['event'] and json_data['event'].get('contentEnd', {}).get('type') == 'TOOL':
-                                    debug_print("Processing tool use and sending result")
-                                    toolResult = await self.processToolUse(self.toolName, self.toolUseContent)
-                                    
-                                    # Send tool start event
-                                    toolContent = str(uuid.uuid4())
-                                    tool_start_event = S2sEvent.content_start_tool(self.prompt_name, toolContent, self.toolUseId)
-                                    await self.send_raw_event(tool_start_event)
-                                    
-                                    # Send tool result event
-                                    if isinstance(toolResult, dict):
-                                        content_json_string = json.dumps(toolResult)
-                                    else:
-                                        content_json_string = toolResult
-
-                                    tool_result_event = S2sEvent.text_input_tool(self.prompt_name, toolContent, content_json_string)
-                                    await self.send_raw_event(tool_result_event)
-                                    
-                                    # Send tool content end event
-                                    tool_content_end_event = S2sEvent.content_end(self.prompt_name, toolContent)
-                                    await self.send_raw_event(tool_content_end_event)
-                            
-                            # Put the response in the output queue for forwarding to the frontend
-                            await self.output_queue.put(json_data)
-                        except json.JSONDecodeError:
-                            await self.output_queue.put({"raw_data": response_data})
-                except StopAsyncIteration:
-                    # Stream has ended
-                    break
-                except Exception as e:
-                   # Handle ValidationException properly
-                    if "ValidationException" in str(e):
-                        error_message = str(e)
-                        print(f"Validation error: {error_message}")
-                    else:
-                        print(f"Error receiving response: {e}")
-                    break
+        while self.is_active:
+            try:            
+                output = await self.stream.await_output()
+                result = await output[1].receive()
+                
+                if result.value and result.value.bytes_:
+                    response_data = result.value.bytes_.decode('utf-8')
                     
-        except Exception as e:
-            print(f"Response processing error: {e}")
-        finally:
-            self.is_active = False
+                    json_data = json.loads(response_data)
+                    json_data["timestamp"] = int(time.time() * 1000)  # Milliseconds since epoch
+                    
+                    event_name = None
+                    if 'event' in json_data:
+                        event_name = list(json_data["event"].keys())[0]
+                        # if event_name == "audioOutput":
+                        #     print(json_data)
+                        
+                        # Handle tool use detection
+                        if event_name == 'toolUse':
+                            self.toolUseContent = json_data['event']['toolUse']
+                            self.toolName = json_data['event']['toolUse']['toolName']
+                            self.toolUseId = json_data['event']['toolUse']['toolUseId']
+                            debug_print(f"Tool use detected: {self.toolName}, ID: {self.toolUseId}, "+ json.dumps(json_data['event']))
+
+                        # Process tool use when content ends
+                        elif event_name == 'contentEnd' and json_data['event'][event_name].get('type') == 'TOOL':
+                            prompt_name = json_data['event']['contentEnd'].get("promptName")
+                            debug_print("Processing tool use and sending result")
+                            toolResult = await self.processToolUse(self.toolName, self.toolUseContent)
+                            
+                            # Send tool start event
+                            toolContent = str(uuid.uuid4())
+                            tool_start_event = S2sEvent.content_start_tool(prompt_name, toolContent, self.toolUseId)
+                            await self.send_raw_event(tool_start_event)
+                            
+                            # Send tool result event
+                            if isinstance(toolResult, dict):
+                                content_json_string = json.dumps(toolResult)
+                            else:
+                                content_json_string = toolResult
+
+                            tool_result_event = S2sEvent.text_input_tool(prompt_name, toolContent, content_json_string)
+                            await self.send_raw_event(tool_result_event)
+
+                            # Send tool content end event
+                            tool_content_end_event = S2sEvent.content_end(prompt_name, toolContent)
+                            await self.send_raw_event(tool_content_end_event)
+                    
+                    # Put the response in the output queue for forwarding to the frontend
+                    await self.output_queue.put(json_data)
+
+
+            except json.JSONDecodeError as ex:
+                print(ex)
+                await self.output_queue.put({"raw_data": response_data})
+            except StopAsyncIteration as ex:
+                # Stream has ended
+                print(ex)
+            except Exception as e:
+                # Handle ValidationException properly
+                if "ValidationException" in str(e):
+                    error_message = str(e)
+                    print(f"Validation error: {error_message}")
+                else:
+                    print(f"Error receiving response: {e}")
+                break
+
+        self.is_active = False
+        self.close()
 
     async def processToolUse(self, toolName, toolUseContent):
         """Return the tool result"""
         print(f"Tool Use Content: {toolUseContent}")
 
         query = None
-        if 'content' in toolUseContent:
+        if toolUseContent.get("content"):
             # Parse the JSON string in the content field
             query_json = json.loads(toolUseContent.get("content"))
-            query = query_json.get("query", "")
+            query = query_json.get("argName1", "")
             print(f"Extracted query: {query}")
         
         if toolName == "getKbTool":
+            if not query:
+                query = "amazon community policy"
             results = kb.retrieve_kb(query)
             #print("///",results)
             return { "result": results}
         if toolName == "getDateTool":
             from datetime import datetime, timezone
-            return {"result":  datetime.now(timezone.utc).strftime('%A, %Y-%m-%d')}
+            return {"result":  datetime.now(timezone.utc).strftime('%A, %Y-%m-%d %H-%M-%S')}
         
         if toolName == "getTravelPolicyTool":
             return {"result": "Travel with pet is not allowed at the XYZ airline."}
@@ -263,8 +257,8 @@ class S2sSessionManager:
             
         self.is_active = False
         
-        if self.stream_response:
-            await self.stream_response.input_stream.close()
+        if self.stream:
+            await self.stream.input_stream.close()
         
         if self.response_task and not self.response_task.done():
             self.response_task.cancel()

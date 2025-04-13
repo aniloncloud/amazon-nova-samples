@@ -1,8 +1,8 @@
-import React from 'react';
+import React, { createRef } from 'react';
 import './s2s.css'
-import { Icon, Alert, Button, Modal, Box, SpaceBetween, Container, ColumnLayout, Header, FormField, Select, Textarea } from '@cloudscape-design/components';
+import { Icon, Alert, Button, Modal, Box, SpaceBetween, Container, ColumnLayout, Header, FormField, Select, Textarea, Checkbox } from '@cloudscape-design/components';
 import S2sEvent from './helper/s2sEvents';
-import {base64LPCM, AudioQueue} from './helper/audioHelper';
+import {base64LPCM} from './helper/audioHelper';
 
 class S2sChatBot extends React.Component {
 
@@ -22,6 +22,8 @@ class S2sChatBot extends React.Component {
             eventsByContentName: [],
             audioChunks: [],
             audioInputIndex: 0,
+            audioPlayPromise: null,
+            includeChatHistory: false,
 
             promptName: null,
             textContentName: null,
@@ -29,77 +31,19 @@ class S2sChatBot extends React.Component {
 
             // S2S config items
             configAudioInput: null,
-            configSystemPrompt: "You are a friend. The user and you will engage in a spoken dialog exchanging the transcripts of a natural real-time conversation. Keep your responses short, generally two or three sentences for chatty scenarios.",
-            configAudioOutput: {
-                "mediaType": "audio/lpcm",
-                "sampleRateHertz": 24000,
-                "sampleSizeBits": 16,
-                "channelCount": 1,
-                "voiceId": "matthew",
-                "encoding": "base64",
-                "audioType": "SPEECH"
-              },
-            configVoiceIdOption: { label: "Matthew", value: "matthew" },
-            configToolUse: JSON.stringify({
-                tools: [{
-                  toolSpec: {
-                    name: "getDateTool",
-                    description: "get information about the current day",
-                    inputSchema: {
-                      json: JSON.stringify({
-                        "$schema": "http://json-schema.org/draft-07/schema#",
-                        type: "object",
-                        properties: {},
-                        required: []
-                      })
-                    }
-                  }
-                },
-                {
-                  toolSpec: {
-                    name: "getKbTool",
-                    description: "get information about the Amazon policy",
-                    inputSchema: {
-                      json: JSON.stringify({
-                        "$schema": "http://json-schema.org/draft-07/schema#",
-                        type: "object",
-                        properties: {
-                          query: {
-                            type: "string",
-                            description: "the query to search"
-                          }
-                        },
-                        required: []
-                      })
-                    }
-                  }
-                },
-                {
-                  toolSpec: {
-                    name: "getTravelPolicyTool",
-                    description: "get information about the travel with pet policy",
-                    inputSchema: {
-                      json: JSON.stringify({
-                        "$schema": "http://json-schema.org/draft-07/schema#",
-                        type: "object",
-                        properties: {
-                          query: {
-                            type: "string",
-                            description: "the query to search"
-                          }
-                        },
-                        required: []
-                      })
-                    }
-                  }
-                }
-              ]
-              }, null, 2)
+            configSystemPrompt: S2sEvent.DEFAULT_SYSTEM_PROMPT,
+            configAudioOutput: S2sEvent.DEFAULT_AUDIO_OUTPUT_CONFIG,
+            configVoiceIdOption: { label: "Matthew (en-US)", value: "matthew" },
+            configToolUse: JSON.stringify(S2sEvent.DEFAULT_TOOL_CONFIG, null, 2),
+            configChatHistory: JSON.stringify(S2sEvent.DEFAULT_CHAT_HISTORY, null, 2),
         };
         this.socket = null;
         this.mediaRecorder = null;
-        this.audioQueue = new AudioQueue();
+        //this.audioQueue = new AudioQueue();
         this.chatMessagesEndRef = React.createRef();
+        this.audioPlayerRef = createRef();
+        this.audioQueue = [];
+
     }
 
     componentDidMount() {
@@ -120,6 +64,59 @@ class S2sChatBot extends React.Component {
         }
     }
     
+    cancelAudio() {
+        try {
+            if (this.audioPlayerRef.current && this.state.audioPlayPromise) {
+                this.audioPlayerRef.current.pause();
+                this.audioPlayerRef.current.currentTime = 0;
+                //this.audioPlayerRef.current.removeAttribute('src');
+                this.setState({audioPlayPromise: null});
+              }
+              this.audioQueue = []
+              this.setState({
+                isPlaying: false,
+              });
+        }
+        catch(err) {
+            console.log(err);
+        }
+    }
+
+    audioEnqueue(audioUrl) {
+        this.audioQueue.push(audioUrl);
+        if (!this.state.isPlaying) {
+            this.playNext();
+        }
+    }
+
+    playNext() {
+        try{
+            if (this.isPlaying || this.audioQueue.length === 0) return;
+        
+            if (this.audioPlayerRef.current && this.audioQueue.length > 0) {
+                let audioUrl  = this.audioQueue.shift();
+                this.setState({ isPlaying: true});
+
+                try {
+                    this.audioPlayerRef.current.src = audioUrl;
+                    this.audioPlayerRef.current.load();  // Reload the audio element to apply the new src
+                    this.setState({audioPlayPromise: this.audioPlayerRef.current.play()}); 
+                }
+                catch(err) {
+                    console.log(err);
+                }
+                
+                // Wait for the audio to finish, then play the next one
+                this.audioPlayerRef.current.onended = () => {
+                    this.setState({ isPlaying: false});
+                    this.playNext();
+                };
+            }
+        }
+        catch (error) {
+            console.log(error);
+        }
+    }
     handleIncomingMessage (message) {
         const eventType = Object.keys(message?.event)[0];
         const role = message.event[eventType]["role"];
@@ -127,21 +124,19 @@ class S2sChatBot extends React.Component {
         const contentId = message.event[eventType].contentId;
         let stopReason = message.event[eventType].stopReason;
         const contentType = message.event[eventType].type;
+        var chatMessages = this.state.chatMessages;
+        var audioResponse = this.state.audioResponse;
 
         switch(eventType) {
             case "textOutput": 
-                //const prefix = "Speculative: ";
                 // Detect interruption
                 if (role === "ASSISTANT" && content.startsWith("{")) {
                     const evt = JSON.parse(content);
                     if (evt.interrupted === true) {
-                        stopReason = "END_TURN"
-                        this.audioQueue.cancel();
-                        //break;
+                        this.cancelAudio()
                     }
                 }
 
-                var chatMessages = this.state.chatMessages;
                 if (chatMessages.hasOwnProperty(contentId)) {
                     chatMessages[contentId].content = content;
                     chatMessages[contentId].role = role;
@@ -152,17 +147,25 @@ class S2sChatBot extends React.Component {
                 this.setState({chatMessages: chatMessages});
                 break;
             case "audioOutput":
-                this.state.audioResponse[contentId] += message.event[eventType].content;
+                audioResponse[contentId] += message.event[eventType].content;
+                this.setState({audioResponse: audioResponse});
+                //this.state.audioResponse[contentId] += message.event[eventType].content;
                 break;
             case "contentStart":
                 if (contentType === "AUDIO") {
-                    this.state.audioResponse[contentId] = "";
+                    audioResponse[contentId] = "";
+                    this.setState({audioResponse: audioResponse});
                 }
                 else if (contentType === "TEXT") {
-                    var chatMessages = this.state.chatMessages;
+                    var generationStage = "";
+                    if (message.event.contentStart.additionalModelFields) {
+                        generationStage = JSON.parse(message.event.contentStart.additionalModelFields)?.generationStage;
+                    }
+
                     chatMessages[contentId] =  {
                         "content": "", 
                         "role": role,
+                        "generationStage": generationStage,
                         "raw": [],
                     };
                     chatMessages[contentId].raw.push(message);
@@ -172,11 +175,10 @@ class S2sChatBot extends React.Component {
             case "contentEnd":
                 if (contentType === "AUDIO") {
                     var audioUrl = base64LPCM(this.state.audioResponse[contentId]);
-                    
-                    this.audioQueue.enqueue(audioUrl);
+                    this.audioEnqueue(audioUrl);
+                    //this.audioQueue.enqueue(audioUrl);
                 }
                 else if (contentType === "TEXT"){
-                    var chatMessages = this.state.chatMessages;
                     if (chatMessages.hasOwnProperty(contentId)) {
                         if (chatMessages[contentId].raw === undefined)
                             chatMessages[contentId].raw = [];
@@ -186,6 +188,9 @@ class S2sChatBot extends React.Component {
                     this.setState({chatMessages: chatMessages});
 
                 }
+                break;
+            default:
+                break;
 
         }
 
@@ -197,6 +202,8 @@ class S2sChatBot extends React.Component {
             const eventName = Object.keys(event?.event)[0];
             let key = null;
             let ts = Date.now();
+            let interrupted = false;
+
             if (eventName === "audioOutput") {
                 const contentId = event.event[eventName].contentId;
                 key = `${eventName}-${contentId.substr(0,8)}`;
@@ -211,15 +218,17 @@ class S2sChatBot extends React.Component {
                 if (type === "in" && event.event[eventName].type === "AUDIO") {
                     this.setState({audioInputIndex: this.state.audioInputIndex + 1});
                 }
+                else if(type === "out") {
+                    const contentName = event.event[eventName].contentName;
+                    key = `${eventName}-${contentName.substr(0,8)}-${contentType}-${ts}`;
+                }
             }
             else if(eventName === "textOutput") {
                 const role = event.event[eventName].role;
                 const content = event.event[eventName].content;
                 if (role === "ASSISTANT" && content.startsWith("{")) {
                     const evt = JSON.parse(content);
-                    if (evt.interrupted === true) {
-                        event.interrupted = true;
-                    }
+                    interrupted = evt.interrupted === true;
                 }
                 key = `${eventName}-${ts}`;
             }
@@ -234,23 +243,25 @@ class S2sChatBot extends React.Component {
             let exists = false;
             for(var i=0;i<eventsByContentName.length;i++) {
                 var item = eventsByContentName[i];
-                if (item.key == key && item.type == type) {
+                if (item.key === key && item.type === type) {
                     item.events.push(event);
+
+                    item.interrupted = interrupted;
                     exists = true;
                     break;
                 }
             }
             if (!exists) {
-                eventsByContentName.unshift({
+                const item = {
                     key: key, 
                     name: eventName, 
                     type: type, 
                     events: [event], 
                     ts: ts,
-                    interrupted: event.interrupted !== undefined?event.interrupted: null
-                })
+                };
+                eventsByContentName.unshift(item);
             }
-            this.setState({eventsByContentName, eventsByContentName});
+            this.setState({eventsByContentName: eventsByContentName});
         }
     }
 
@@ -258,6 +269,7 @@ class S2sChatBot extends React.Component {
         if (this.state.sessionStarted) {
             // End session
             this.endSession();
+            this.cancelAudio();
         }
         else {
             this.setState({chatMessages:[], events: [], eventsByContentName: []});
@@ -288,12 +300,29 @@ class S2sChatBot extends React.Component {
                 var audioConfig = S2sEvent.DEFAULT_AUDIO_OUTPUT_CONFIG;
                 audioConfig.voiceId = this.state.configVoiceIdOption.value;
                 var toolConfig = this.state.configToolUse?JSON.parse(this.state.configToolUse):S2sEvent.DEFAULT_TOOL_CONFIG;
+
                 this.sendEvent(S2sEvent.promptStart(promptName, audioConfig, toolConfig));
 
                 this.sendEvent(S2sEvent.contentStartText(promptName, textContentName));
 
                 this.sendEvent(S2sEvent.textInput(promptName, textContentName, this.state.configSystemPrompt));
                 this.sendEvent(S2sEvent.contentEnd(promptName, textContentName));
+
+                // Chat history
+                if (this.state.includeChatHistory) {
+                    const chatHistoryContentName = crypto.randomUUID();
+                    
+                    this.sendEvent(S2sEvent.contentStartText(promptName, chatHistoryContentName));
+                    
+                    var chatHistory = JSON.parse(this.state.configChatHistory);
+                    if (chatHistory === null) chatHistory = S2sEvent.DEFAULT_CHAT_HISTORY;
+                    for (const chat of chatHistory) {
+                        this.sendEvent(S2sEvent.textInput(promptName, chatHistoryContentName, chat.content, chat.role));
+                    }
+                    
+                    this.sendEvent(S2sEvent.contentEnd(promptName, chatHistoryContentName));
+                }
+
                 this.sendEvent(S2sEvent.contentStartAudio(promptName, audioContentName));
               };
 
@@ -312,6 +341,8 @@ class S2sChatBot extends React.Component {
             // Handle connection close
             this.socket.onclose = () => {
                 console.log("WebSocket Disconnected");
+                if (this.state.sessionStarted)
+                    this.setState({alert: "WebSocket Disconnected"});
             };
         }
     }
@@ -434,15 +465,20 @@ class S2sChatBot extends React.Component {
         return (
             <div className="s2s">
                 {this.state.alert !== null && this.state.alert.length > 0?
-                <Alert statusIconAriaLabel="Warning" type="warning">
+                <div><Alert statusIconAriaLabel="Warning" type="warning">
                 {this.state.alert}
-                </Alert>:<div/>}
+                </Alert><br/></div>:<div/>}
                 <div className='top'>
                     <div className='action'>
                         <Button variant='primary' onClick={this.handleSessionChange}>
                             <Icon name={this.state.sessionStarted?"microphone-off":"microphone"} />&nbsp;&nbsp;
                             {this.state.sessionStarted?"End Conversation":"Start Conversation"}
                         </Button>
+                        <div className='chathistory'>
+                            <Checkbox checked={this.state.includeChatHistory} onChange={({ detail }) => this.setState({includeChatHistory: detail.checked})}>Include chat history</Checkbox>
+                            <div className='desc'>You can view sample chat history in the settings.</div>
+                        </div>
+                        <audio ref={this.audioPlayerRef}></audio>
                     </div>
                     <div className='setting'>
                         <Button onClick={()=> 
@@ -473,17 +509,9 @@ class S2sChatBot extends React.Component {
                                         }>
                                         <Icon name={msg.role === "USER"?"user-profile":"gen-ai"} />&nbsp;&nbsp;
                                         {msg.content}
+                                        {msg.role === "ASSISTANT" && msg.generationStage? ` [${msg.generationStage}]`:""}
                                     </div>
                                 </div>
-                            // else if(index === this.state.chatMessages.length-1 && msg.role === "ASSISTANT" && msg.stopReason !== "END_TURN") {
-                            //     return <div class="loading-bubble">
-                            //                 <div class="loading-dots">
-                            //                     <span></span>
-                            //                     <span></span>
-                            //                     <span></span>
-                            //                 </div>
-                            //             </div>
-                            // }
                         })}
                         <div className='endbar' ref={this.chatMessagesEndRef}></div>
                     </div>
@@ -495,8 +523,8 @@ class S2sChatBot extends React.Component {
                         {this.state.eventsByContentName.map(event=>{
                             return <div className={
                                     event.name === "toolUse"? "event-tool": 
-                                    event.type === "in"?"event-in":
-                                    event.interrupted === true?"event-int":"event-out"
+                                    event.interrupted === true?"event-int":
+                                    event.type === "in"?"event-in":"event-out"
                                 } 
                                 onClick={() => {
                                     this.setState({selectedEvent: event, showEventJson: true});
@@ -573,8 +601,11 @@ class S2sChatBot extends React.Component {
                                             this.setState({configVoiceIdOption: detail.selectedOption})
                                         }
                                         options={[
-                                            { label: "Matthew", value: "matthew" },
-                                            { label: "Ruth", value: "ruth" }
+                                            { label: "Matthew (en-US)", value: "matthew" },
+                                            { label: "Ruth (en-US)", value: "ruth" },
+                                            { label: "Amy (en-GB)", value: "amy" },
+                                            { label: "Olivia (en-AU)", value: "olivia"},
+                                            { label: "Kajal (en-In)", value: "kajal"},
                                         ]}
                                         />
                                 </FormField>
@@ -600,6 +631,19 @@ class S2sChatBot extends React.Component {
                                         onChange={({ detail }) => this.setState({configToolUse: detail.value})}
                                         value={this.state.configToolUse}
                                         rows={10}
+                                        placeholder="{}"
+                                    />
+                                </FormField>
+                                        <br/>
+                                <FormField
+                                    label="Chat history"
+                                    description="Sample chat history to resume conversation"
+                                    stretch={true}
+                                >
+                                    <Textarea
+                                        onChange={({ detail }) => this.setState({configChatHistory: detail.value})}
+                                        value={this.state.configChatHistory}
+                                        rows={15}
                                         placeholder="{}"
                                     />
                                 </FormField>

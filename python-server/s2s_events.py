@@ -7,9 +7,13 @@ class S2sEvent:
         "topP": 0.95,
         "temperature": 0.7
     }
-  DEFAULT_SYSTEM_PROMPT = "You are a friend. The user and you will engage in a spoken dialog " \
-              "exchanging the transcripts of a natural real-time conversation. Keep your responses short, " \
-              "generally two or three sentences for chatty scenarios."
+  #DEFAULT_SYSTEM_PROMPT = "You are a friend. The user and you will engage in a spoken dialog " \
+  #            "exchanging the transcripts of a natural real-time conversation. Keep your responses short, " \
+  #            "generally two or three sentences for chatty scenarios."
+  DEFAULT_SYSTEM_PROMPT = "You are a friendly assistant. The user and you will engage in a spoken dialog " \
+    "exchanging the transcripts of a natural real-time conversation. Keep your responses short, " \
+    "generally two or three sentences for chatty scenarios."
+
   DEFAULT_AUDIO_INPUT_CONFIG = {
         "mediaType":"audio/lpcm",
         "sampleRateHertz":16000,
@@ -88,6 +92,7 @@ class S2sEvent:
           "contentName":content_name,
           "type":"TEXT",
           "interactive":True,
+          "role": "SYSTEM",
           "textInputConfiguration":{
             "mediaType":"text/plain"
             }
@@ -103,7 +108,6 @@ class S2sEvent:
           "promptName":prompt_name,
           "contentName":content_name,
           "content":system_prompt,
-          "role":"SYSTEM"
         }
       }
     }
@@ -141,7 +145,6 @@ class S2sEvent:
           "promptName": prompt_name,
           "contentName": content_name,
           "content": content,
-          "role": "USER"
         }
       }
     }
@@ -155,6 +158,7 @@ class S2sEvent:
             "contentName": content_name,
             "interactive": False,
             "type": "TOOL",
+            "role": "TOOL",
             "toolResultInputConfiguration": {
               "toolUseId": tool_use_id,
               "type": "TEXT",
@@ -170,11 +174,11 @@ class S2sEvent:
   def text_input_tool(prompt_name, content_name, content):
     return {
       "event": {
-        "textInput": {
+        "toolResult": {
           "promptName": prompt_name,
           "contentName": content_name,
           "content": content,
-          "role": "TOOL"
+          #"role": "TOOL"
         }
       }
     }
