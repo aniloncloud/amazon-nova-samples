@@ -84,7 +84,7 @@ nova-s2s-workshop/
     ```
     The WebSocket host and port must be specified:
     ```bash
-    export HOST="0.0.0.0"
+    export HOST="localhost"
     export WS_PORT=8081
     ```
     The health check port is optional for container deployment such as ECS/EKS. If the environment variable below is not specified, the service will not start the HTTP endpoint for health checks.
@@ -109,9 +109,9 @@ nova-s2s-workshop/
 
 3. Set up environment variables for the REACT app.
 
-    If you've started the WebSocket from the previous step, set WS_URL to ws://0.0.0.0:8081
+    If you've started the WebSocket from the previous step, set WS_URL to ws://localhost:8081
     ```bash
-    export WS_URL='ws://0.0.0.0:8081'
+    export WS_URL='ws://localhost:8081'
     ```
 
     You can ignore the Bedrock Knowledge Base ID if you do not plan to test or implement Knowledge Base integration.
