@@ -585,7 +585,7 @@ class S2sChatBot extends React.Component {
                             footer={
                                 <Box float="right">
                                 <SpaceBetween direction="horizontal" size="xs">
-                                    <Button variant="link" onClick={() => this.setState({showConfig: false})}>Close</Button>
+                                    <Button variant="link" onClick={() => this.setState({showConfig: false})}>Save</Button>
                                 </SpaceBetween>
                                 </Box>
                             }
@@ -602,10 +602,8 @@ class S2sChatBot extends React.Component {
                                         }
                                         options={[
                                             { label: "Matthew (en-US)", value: "matthew" },
-                                            { label: "Ruth (en-US)", value: "ruth" },
+                                            { label: "Tiffany (en-US)", value: "tiffany" },
                                             { label: "Amy (en-GB)", value: "amy" },
-                                            { label: "Olivia (en-AU)", value: "olivia"},
-                                            { label: "Kajal (en-In)", value: "kajal"},
                                         ]}
                                         />
                                 </FormField>
