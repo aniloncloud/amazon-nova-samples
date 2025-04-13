@@ -94,7 +94,7 @@ nova-s2s-workshop/
 
 5. Start the python websocket server
     ```bash
-    python server.py --host localhost --port 8081
+    python server.py
     ```
 
 ### Install and start the REACT frontend application
@@ -111,7 +111,7 @@ nova-s2s-workshop/
 
     If you've started the WebSocket from the previous step, set WS_URL to ws://localhost:8081
     ```bash
-    export WS_URL='ws://localhost:8081'
+    export REACT_APP_WEBSOCKET_URL='ws://localhost:8081'
     ```
 
     You can ignore the Bedrock Knowledge Base ID if you do not plan to test or implement Knowledge Base integration.
