@@ -118,8 +118,9 @@ nova-s2s-workshop/
     ```bash
     export KB_ID='YOUR_KNOWLEDGE_BASES_ID'
     ```
+4. If you want to run the React code outside the workshop environment, update the `homepage` value in the `react-client/package.json` file from "/proxy/3000/" to ".".
 
-4. Run
+5. Run
     ```
     npm start
     ```
