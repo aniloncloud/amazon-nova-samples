@@ -91,6 +91,11 @@ nova-s2s-workshop/
     ```bash
     export HEALTH_PORT=8082 
     ```
+    
+    You can ignore the Bedrock Knowledge Base ID if you do not plan to test or implement Knowledge Base integration.
+    ```bash
+    export KB_ID='YOUR_KNOWLEDGE_BASES_ID'
+    ```
 
 5. Start the python websocket server
     ```bash
@@ -114,10 +119,6 @@ nova-s2s-workshop/
     export REACT_APP_WEBSOCKET_URL='ws://localhost:8081'
     ```
 
-    You can ignore the Bedrock Knowledge Base ID if you do not plan to test or implement Knowledge Base integration.
-    ```bash
-    export KB_ID='YOUR_KNOWLEDGE_BASES_ID'
-    ```
 4. If you want to run the React code outside the workshop environment, update the `homepage` value in the `react-client/package.json` file from "/proxy/3000/" to "."
 
 5. Run
