@@ -1,3 +1,4 @@
+# This is only required by the instructor-led workshop
 #!/bin/bash
 
 # Install REACT dependencies
