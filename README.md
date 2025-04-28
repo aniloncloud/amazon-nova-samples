@@ -75,6 +75,7 @@ cd nova-s2s-workshop
     ```bash
     export AWS_ACCESS_KEY_ID="YOUR_AWS_ACCESS_KEY_ID"
     export AWS_SECRET_ACCESS_KEY="YOUR_AWS_SECRET"
+    export AWS_DEFAULT_REGION=us-east-1
     ```
     The WebSocket host and port must be specified:
     ```bash
