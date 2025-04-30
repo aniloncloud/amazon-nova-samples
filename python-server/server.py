@@ -120,10 +120,6 @@ async def websocket_handler(websocket):
                         forward_task = asyncio.create_task(forward_responses(websocket, stream_manager))
 
                         event_type = list(data['event'].keys())[0]
-                        if event_type and event_type == "audioInput":
-                            print(message[0:180])
-                        else:
-                            print(message)
 
                     # Store prompt name and content names if provided
                     if event_type and event_type == 'promptStart':
@@ -132,7 +128,7 @@ async def websocket_handler(websocket):
                         stream_manager.audio_content_name = data['event']['contentStart']['contentName']
                     
                     # Handle audio input separately
-                    if event_type == 'audioInput':
+                    if event_type and event_type == 'audioInput':
                         # Extract audio data
                         prompt_name = data['event']['audioInput']['promptName']
                         content_name = data['event']['audioInput']['contentName']

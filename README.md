@@ -98,6 +98,8 @@ cd nova-s2s-workshop
     python server.py
     ```
 
+⚠️ **Warning:** Keep the Python WebSocket server running, then run the section below to launch the React web application, which will connect to the WebSocket service.
+
 ### Install and start the REACT frontend application
 1. Navigate to the `react-client` folder
     ```bash

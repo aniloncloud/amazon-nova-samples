@@ -100,7 +100,7 @@ class S2sChatBot extends React.Component {
                 try {
                     this.audioPlayerRef.current.src = audioUrl;
                     this.audioPlayerRef.current.load();  // Reload the audio element to apply the new src
-                    this.setState({audioPlayPromise: this.audioPlayerRef.current.play()}); 
+                    this.setState({audioPlayPromise: this.audioPlayerRef.current.play().catch((err) => {})}); 
                 }
                 catch(err) {
                     console.log(err);
@@ -355,6 +355,7 @@ class S2sChatBot extends React.Component {
 
             // Start microphone 
             this.startMicrophone();
+
         } catch (error) {
             console.error('Error accessing microphone: ', error);
         }

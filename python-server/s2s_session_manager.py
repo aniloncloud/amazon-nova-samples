@@ -53,17 +53,18 @@ class S2sSessionManager:
 
     def _initialize_client(self):
         # Get session token from sts using key and secret and set to env varaibles
-        self.sts_client = boto3.client(
-            'sts',
-            aws_access_key_id=self.aws_key,
-            aws_secret_access_key=self.aws_secret,
-            region_name=self.region,
-        )
-        response = self.sts_client.get_session_token(DurationSeconds=7200)
-        credentials = response['Credentials']
-        os.environ["AWS_ACCESS_KEY_ID"] = credentials['AccessKeyId']
-        os.environ["AWS_SECRET_ACCESS_KEY"] = credentials['SecretAccessKey']
-        os.environ["AWS_SESSION_TOKEN"] = credentials['SessionToken']
+        if "AWS_SESSION_TOKEN" not in os.environ:
+            self.sts_client = boto3.client(
+                'sts',
+                aws_access_key_id=self.aws_key,
+                aws_secret_access_key=self.aws_secret,
+                region_name=self.region,
+            )
+            response = self.sts_client.get_session_token(DurationSeconds=7200)
+            credentials = response['Credentials']
+            os.environ["AWS_ACCESS_KEY_ID"] = credentials['AccessKeyId']
+            os.environ["AWS_SECRET_ACCESS_KEY"] = credentials['SecretAccessKey']
+            os.environ["AWS_SESSION_TOKEN"] = credentials['SessionToken']
 
         # Init Lambda client
         self.lambda_client = boto3.client('lambda',
@@ -262,7 +263,8 @@ class S2sSessionManager:
                 response = self.call_lambda(toolName.replace("lambda_",""), query)
                 result = { "result_from_files": response.get("body").get("text")}
 
-                # Data will be returned to the client side as a customized event
+                # Default None
+                # This service will send this value to the client app via the ws connection before the result of the external call is received.
                 client_data = None
                 if "citation" in response.get("body") and response.get("body").get("citation"):
                     client_data = {"citation": response.get("body").get("citation")}
@@ -273,7 +275,7 @@ class S2sSessionManager:
             if toolName == "getDateTool":
                 from datetime import datetime, timezone
                 result = {"result": f"In UTC: {datetime.now(timezone.utc).strftime('%A, %Y-%m-%d %H-%M-%S')}"}
-
+                
             return result, client_data
         except Exception as ex:
             self.logger.error(f"Failed to process ToolUse event. ToolName: {toolName}, ToolUseContext: {toolUseContent} Exception: {ex}")
@@ -309,3 +311,4 @@ class S2sSessionManager:
             return response_payload
         except Exception as ex:
             self.logger.error(ex)
+
