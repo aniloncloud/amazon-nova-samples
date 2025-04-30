@@ -1,11 +1,11 @@
 import asyncio
 import json
-import base64
 import warnings
 import uuid
 from s2s_events import S2sEvent
 import bedrock_knowledge_bases as kb
 import time
+
 from aws_sdk_bedrock_runtime.client import BedrockRuntimeClient, InvokeModelWithBidirectionalStreamOperationInput
 from aws_sdk_bedrock_runtime.models import InvokeModelWithBidirectionalStreamInputChunk, BidirectionalInputPayloadPart
 from aws_sdk_bedrock_runtime.config import Config, HTTPAuthSchemeResolver, SigV4AuthScheme
