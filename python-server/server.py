@@ -24,7 +24,7 @@ AWS_DEFAULT_REGION = os.environ.get("AWS_DEFAULT_REGION","us-east-1")
 AWS_ACCESS_KEY_ID = os.environ["AWS_ACCESS_KEY_ID"]
 AWS_SECRET_ACCESS_KEY = os.environ["AWS_SECRET_ACCESS_KEY"]
 WS_PORT = int(os.environ["WS_PORT"])
-HEALTH_PORT = os.environ["HEALTH_PORT"]
+HEALTH_PORT = os.environ.get("HEALTH_PORT")
 if HEALTH_PORT:
     HEALTH_PORT = int(HEALTH_PORT)
 HOST = os.environ["HOST"]
