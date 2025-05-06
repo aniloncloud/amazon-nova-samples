@@ -6,6 +6,8 @@ import uuid
 from s2s_events import S2sEvent
 import bedrock_knowledge_bases as kb
 import time
+import inline_agent_mcp
+import direct_mcp
 from aws_sdk_bedrock_runtime.client import BedrockRuntimeClient, InvokeModelWithBidirectionalStreamOperationInput
 from aws_sdk_bedrock_runtime.models import InvokeModelWithBidirectionalStreamInputChunk, BidirectionalInputPayloadPart
 from aws_sdk_bedrock_runtime.config import Config, HTTPAuthSchemeResolver, SigV4AuthScheme
@@ -35,6 +37,7 @@ class S2sSessionManager:
         self.output_queue = asyncio.Queue()
         
         self.response_task = None
+        self.audio_task = None
         self.stream = None
         self.is_active = False
         self.bedrock_client = None
@@ -79,7 +82,7 @@ class S2sSessionManager:
             self.response_task = asyncio.create_task(self._process_responses())
 
             # Start processing audio input
-            asyncio.create_task(self._process_audio_input())
+            self.audio_task = asyncio.create_task(self._process_audio_input())
             
             # Wait a bit to ensure everything is set up
             await asyncio.sleep(0.1)
@@ -247,6 +250,65 @@ class S2sSessionManager:
         
         if toolName == "getTravelPolicyTool":
             return {"result": "Travel with pet is not allowed at the XYZ airline."}
+        
+        # Handle MCP tool
+        if toolName == "mcpTool":
+            if not query:
+                return {"result": "No query provided for MCP tool"}
+            
+            # For location-related queries, use the location-services-mcp
+            location_keywords = ["address", "place", "location", "where", "map", "direction", "nearby", "find", "search"]
+            
+            # Check if query contains location-related keywords
+            if any(keyword in query.lower() for keyword in location_keywords):
+                # Create a direct MCP request for location-services-mcp
+                mcp_request = {
+                    "server_id": "location-services-mcp",
+                    "tool_name": "search_places",
+                    "arguments": {
+                        "query": query
+                    }
+                }
+                
+                # Call the direct MCP function
+                result = await direct_mcp.direct_mcp_call(mcp_request)
+                return {"result": result}
+            else:
+                # For other queries, use the InlineAgent
+                result = await inline_agent_mcp.invoke_agent(query)
+                return {"result": result}
+        
+        # Handle InlineAgent MCP tools
+        if toolName == "AgentTool":
+            if not query:
+                return {"result": "No query provided for MCP tool"}
+            
+            # Invoke InlineAgent with the query
+            result = await inline_agent_mcp.invoke_agent(query)
+            return {"result": result}
+            
+        # Handle direct MCP calls
+        if toolName == "directMcpTool":
+            if not query:
+                return {"result": "No query provided for direct MCP tool"}
+            
+            try:
+                # Parse the MCP request from the query
+                mcp_request = json.loads(query)
+                
+                # Validate required fields
+                required_fields = ['server_id', 'tool_name']
+                missing_fields = [field for field in required_fields if field not in mcp_request]
+                if missing_fields:
+                    return {"result": f"Missing required fields: {', '.join(missing_fields)}"}
+                
+                # Call the direct MCP function
+                result = await direct_mcp.direct_mcp_call(mcp_request)
+                return {"result": result}
+            except json.JSONDecodeError:
+                return {"result": "Invalid JSON format for MCP request"}
+            except Exception as e:
+                return {"result": f"Error processing direct MCP request: {str(e)}"}
 
         return {}
     
@@ -266,3 +328,12 @@ class S2sSessionManager:
                 await self.response_task
             except asyncio.CancelledError:
                 pass
+        
+        if self.audio_task and not self.audio_task.done():
+            self.audio_task.cancel()
+            try:
+                await self.audio_task
+            except asyncio.CancelledError:
+                pass
+        
+        # No need to clean up MCP clients as they are now cleaned up after each use
