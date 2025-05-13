@@ -9,6 +9,10 @@ import http.server
 import threading
 import os
 from http import HTTPStatus
+from dotenv import load_dotenv
+
+# Load environment variables from .env if present
+load_dotenv()
 
 # Configure logging
 LOGLEVEL = os.environ.get("LOGLEVEL", "INFO").upper()
@@ -18,16 +22,12 @@ logger = logging.getLogger(__name__)
 # Suppress warnings
 warnings.filterwarnings("ignore")
 
-# Environment Variables
-NOVA_SONIC_MODEL_ID = os.environ.get("NOVA_SONIC_MODEL_ID",'amazon.nova-sonic-v1:0')
-AWS_DEFAULT_REGION = os.environ.get("AWS_DEFAULT_REGION","us-east-1")
-AWS_ACCESS_KEY_ID = os.environ["AWS_ACCESS_KEY_ID"]
-AWS_SECRET_ACCESS_KEY = os.environ["AWS_SECRET_ACCESS_KEY"]
-WS_PORT = int(os.environ["WS_PORT"])
-HEALTH_PORT = os.environ.get("HEALTH_PORT")
-if HEALTH_PORT:
-    HEALTH_PORT = int(HEALTH_PORT)
-HOST = os.environ["HOST"]
+DEBUG = False
+
+def debug_print(message):
+    """Print only if debug mode is enabled"""
+    if DEBUG:
+        print(message)
 
 class HealthCheckHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
@@ -107,11 +107,7 @@ async def websocket_handler(websocket):
                     if stream_manager == None:
                         """Handle WebSocket connections from the frontend."""
                         # Create a new stream manager for this connection
-                        stream_manager = S2sSessionManager(model_id=NOVA_SONIC_MODEL_ID, 
-                                                           region=AWS_DEFAULT_REGION, 
-                                                           aws_key=AWS_ACCESS_KEY_ID, 
-                                                           aws_secret=AWS_SECRET_ACCESS_KEY, 
-                                                           logger=logger)
+                        stream_manager = S2sSessionManager(model_id='amazon.nova-sonic-v1:0', region='us-east-1')
                         
                         # Initialize the Bedrock stream
                         await stream_manager.initialize_stream()
@@ -120,35 +116,41 @@ async def websocket_handler(websocket):
                         forward_task = asyncio.create_task(forward_responses(websocket, stream_manager))
 
                         event_type = list(data['event'].keys())[0]
-
-                    # Store prompt name and content names if provided
-                    if event_type and event_type == 'promptStart':
-                        stream_manager.prompt_name = data['event']['promptStart']['promptName']
-                    elif event_type == 'contentStart' and data['event']['contentStart'].get('type') == 'AUDIO':
-                        stream_manager.audio_content_name = data['event']['contentStart']['contentName']
-                    
-                    # Handle audio input separately
-                    if event_type and event_type == 'audioInput':
-                        # Extract audio data
-                        prompt_name = data['event']['audioInput']['promptName']
-                        content_name = data['event']['audioInput']['contentName']
-                        audio_base64 = data['event']['audioInput']['content']
+                        if event_type == "audioInput":
+                            debug_print(message[0:180])
+                        else:
+                            debug_print(message)
+                            
+                    if event_type:
+                        # Store prompt name and content names if provided
+                        if event_type == 'promptStart':
+                            stream_manager.prompt_name = data['event']['promptStart']['promptName']
+                        elif event_type == 'contentStart' and data['event']['contentStart'].get('type') == 'AUDIO':
+                            stream_manager.audio_content_name = data['event']['contentStart']['contentName']
                         
-                        # Add to the audio queue
-                        stream_manager.add_audio_chunk(prompt_name, content_name, audio_base64)
-                    else:
-                        # Send other events directly to Bedrock
-                        await stream_manager.send_raw_event(data)
+                        # Handle audio input separately
+                        if event_type == 'audioInput':
+                            # Extract audio data
+                            prompt_name = data['event']['audioInput']['promptName']
+                            content_name = data['event']['audioInput']['contentName']
+                            audio_base64 = data['event']['audioInput']['content']
+                            
+                            # Add to the audio queue
+                            stream_manager.add_audio_chunk(prompt_name, content_name, audio_base64)
+                        else:
+                            # Send other events directly to Bedrock
+                            await stream_manager.send_raw_event(data)
             except json.JSONDecodeError:
                 print("Invalid JSON received from WebSocket")
             except Exception as e:
                 print(f"Error processing WebSocket message: {e}")
-
+                if DEBUG:
+                    import traceback
+                    traceback.print_exc()
     except websockets.exceptions.ConnectionClosed:
         print("WebSocket connection closed")
     finally:
         # Clean up
-        print("cleaning up")
         await stream_manager.close()
         forward_task.cancel()
         if websocket:
@@ -203,13 +205,24 @@ if __name__ == "__main__":
     parser.add_argument('--debug', action='store_true', help='Enable debug mode')
     args = parser.parse_args()
 
-    if not AWS_ACCESS_KEY_ID or not AWS_SECRET_ACCESS_KEY:
-        print(f"AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are required. Received AWS_ACCESS_KEY_ID: {AWS_ACCESS_KEY_ID}, AWS_SECRET_ACCESS_KEY: {AWS_SECRET_ACCESS_KEY}")
-    elif not HOST or not WS_PORT:
-        print(f"HOST and PORT are required. Received HOST: {HOST}, PORT: {WS_PORT}")
+    # Environment variables required for host and ports: 
+    # HOST: for both websocket and health check
+    # WS_PORT: websocket port. 8081
+    # HEALTH_PORT (optional): health check HTTP port. 8082
+
+    host, port, health_port = None, None, None
+    if os.getenv("HOST"):
+        host = str(os.getenv("HOST"))
+    if os.getenv("WS_PORT"):
+        port = int(os.getenv("WS_PORT"))
+    if os.getenv("HEALTH_PORT"):
+        health_port = int(os.getenv("HEALTH_PORT"))
+
+    if not host or not port:
+        print(f"HOST and PORT are required. Received HOST: {host}, PORT: {port}")
     else:
         try:
-            asyncio.run(main(HOST, WS_PORT, HEALTH_PORT))
+            asyncio.run(main(host, port, health_port))
         except KeyboardInterrupt:
             print("Server stopped by user")
         except Exception as e:
