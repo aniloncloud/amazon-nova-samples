@@ -16,13 +16,17 @@ class McpLocationClient:
         self.write: Optional[Any] = None
 
     async def connect_to_server(self):
+        aws_profile = os.getenv("AWS_PROFILE")
+        env = {
+                    "FASTMCP_LOG_LEVEL": "ERROR"
+                }
+        if aws_profile:
+            env["AWS_PROFILE"] = aws_profile
+            
         server_params = StdioServerParameters(
                 command="uvx",
                 args=["awslabs.aws-location-mcp-server@latest"],
-                env={
-                    "AWS_PROFILE": os.getenv("AWS_PROFILE"),
-                    "FASTMCP_LOG_LEVEL": "ERROR"
-                }
+                env=env
             )
         
         # Connect to the server
