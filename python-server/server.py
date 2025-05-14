@@ -9,10 +9,7 @@ import http.server
 import threading
 import os
 from http import HTTPStatus
-from dotenv import load_dotenv
-
-# Load environment variables from .env if present
-load_dotenv()
+from mcp_client import McpLocationClient
 
 # Configure logging
 LOGLEVEL = os.environ.get("LOGLEVEL", "INFO").upper()
@@ -28,6 +25,8 @@ def debug_print(message):
     """Print only if debug mode is enabled"""
     if DEBUG:
         print(message)
+
+MCP_CLIENT = None
 
 class HealthCheckHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
@@ -105,9 +104,10 @@ async def websocket_handler(websocket):
                     data = json.loads(data["body"])
                 if 'event' in data:
                     if stream_manager == None:
+
                         """Handle WebSocket connections from the frontend."""
                         # Create a new stream manager for this connection
-                        stream_manager = S2sSessionManager(model_id='amazon.nova-sonic-v1:0', region='us-east-1')
+                        stream_manager = S2sSessionManager(model_id='amazon.nova-sonic-v1:0', region='us-east-1', mcp_client=MCP_CLIENT)
                         
                         # Initialize the Bedrock stream
                         await stream_manager.initialize_stream()
@@ -155,6 +155,8 @@ async def websocket_handler(websocket):
         forward_task.cancel()
         if websocket:
             websocket.close()
+        if MCP_CLIENT:
+            MCP_CLIENT.cleanup()
 
 
 async def forward_responses(websocket, stream_manager):
@@ -179,6 +181,7 @@ async def forward_responses(websocket, stream_manager):
         websocket.close()
         stream_manager.close()
 
+
 async def main(host, port, health_port):
 
     if health_port:
@@ -186,6 +189,14 @@ async def main(host, port, health_port):
             start_health_check_server(host, health_port)
         except Exception as ex:
             print("Failed to start health check endpoint",ex)
+    
+    # Init MCP client
+    try:
+        global MCP_CLIENT
+        MCP_CLIENT = McpLocationClient()
+        await MCP_CLIENT.connect_to_server()
+    except Exception as ex:
+        print("Failed to start MCP client",ex)
 
     """Main function to run the WebSocket server."""
     try:
@@ -230,3 +241,6 @@ if __name__ == "__main__":
             if args.debug:
                 import traceback
                 traceback.print_exc()
+        finally:
+            if MCP_CLIENT:
+                MCP_CLIENT.cleanup()

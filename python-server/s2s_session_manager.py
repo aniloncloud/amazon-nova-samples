@@ -7,7 +7,6 @@ from s2s_events import S2sEvent
 import bedrock_knowledge_bases as kb
 import time
 import inline_agent  # Updated to use InlineAgent
-import mcp_tools
 from booking import booking_lambda
 from aws_sdk_bedrock_runtime.client import BedrockRuntimeClient, InvokeModelWithBidirectionalStreamOperationInput
 from aws_sdk_bedrock_runtime.models import InvokeModelWithBidirectionalStreamInputChunk, BidirectionalInputPayloadPart
@@ -29,7 +28,7 @@ def debug_print(message):
 class S2sSessionManager:
     """Manages bidirectional streaming with AWS Bedrock using asyncio"""
     
-    def __init__(self, model_id='amazon.nova-sonic-v1:0', region='us-east-1'):
+    def __init__(self, model_id='amazon.nova-sonic-v1:0', region='us-east-1', mcp_client=None):
         """Initialize the stream manager."""
         self.model_id = model_id
         self.region = region
@@ -50,6 +49,7 @@ class S2sSessionManager:
         self.toolUseContent = ""
         self.toolUseId = ""
         self.toolName = ""
+        self.mcp_loc_client = mcp_client
 
     def _initialize_client(self):
         """Initialize the Bedrock client."""
@@ -200,6 +200,7 @@ class S2sSessionManager:
                                 content_json_string = toolResult
 
                             tool_result_event = S2sEvent.text_input_tool(prompt_name, toolContent, content_json_string)
+                            print("Tool result", tool_result_event)
                             await self.send_raw_event(tool_result_event)
 
                             # Send tool content end event
@@ -232,27 +233,24 @@ class S2sSessionManager:
         """Return the tool result"""
         print(f"Tool Use Content: {toolUseContent}")
 
-        query = None
+        content = None
         if toolUseContent.get("content"):
             # Parse the JSON string in the content field
             query_json = json.loads(toolUseContent.get("content"))
-            query = toolUseContent.get("content")  # Pass the JSON string directly to the agent
-            print(f"Extracted query: {query}")
+            content = toolUseContent.get("content")  # Pass the JSON string directly to the agent
+            print(f"Extracted query: {content}")
         
         # Handle built-in tools directly
         if toolName == "getKbTool":
-            if not query:
-                query = "amazon community policy"
-            results = kb.retrieve_kb(query)
+            if not content:
+                content = "amazon community policy"
+            results = kb.retrieve_kb(content)
             return {"result": results}
             
         if toolName == "getDateTool":
             from datetime import datetime, timezone
             return {"result": datetime.now(timezone.utc).strftime('%A, %Y-%m-%d %H-%M-%S')}
-        
-        if toolName == "getTravelPolicyTool":
-            return {"result": "Travel with pet is not allowed at the XYZ airline."}
-            
+                    
         if toolName == "getBookingDetails":
             try:
                 if toolUseContent.get("content"):
@@ -279,16 +277,10 @@ class S2sSessionManager:
                 return {"result": f"Error processing booking details: {str(e)}"}
         
         # For all other tools, use the generic tool handler in mcp_tools.py
-        return await mcp_tools.handle_tool_request(toolName, query)
-        
-        # Note: The following code is unreachable and has been commented out
-        # # Handle InlineAgent MCP tools
-        # if toolName == "mcpTool":
-        #     if not query:
-        #         return {"result": "No query provided for MCP tool"}
-        #     # Invoke InlineAgent with the query
-        #     result = await inline_agent_mcp.invoke_agent(query)
-        #     return {"result": result}
+        # This includes locationMcpTool and any future MCP tools
+        if self.mcp_loc_client:
+            result = await self.mcp_loc_client.call_tool(content)
+            return {"result": json.dumps(result)}
     
     async def close(self):
         """Close the stream properly."""
@@ -309,6 +301,3 @@ class S2sSessionManager:
         
         # Clean up InlineAgent
         await inline_agent.cleanup_agent()
-        
-        # Clean up MCP tools
-        await mcp_tools.cleanup()

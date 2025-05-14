@@ -27,7 +27,8 @@ class S2sEvent {
     };
   
     static DEFAULT_TOOL_CONFIG = {
-      tools: [{
+      tools: [
+        {
         toolSpec: {
           name: "getDateTool",
           description: "get information about the current date and time",
@@ -57,26 +58,24 @@ class S2sEvent {
       },
       {
         toolSpec: {
-          name: "directMcpTool",
-          description: "Search for places or addresses using AWS Location Services",
+          name: "locationMcpTool",
+          description: "Access location services to find places, addresses.",
           inputSchema: {
             json: JSON.stringify({
-              type: "object",
-              properties: {
-                tool_name: { type: "string", description: "The tool to call, e.g., 'search_places'" },
-                arguments: {
-                  type: "object",
-                  properties: {
-                    query: { type: "string", description: "The location or place to search for" }
-                  },
-                  required: ["query"]
-                }
-              },
-              required: ["tool_name", "arguments"]
-            })
+                "type": "object",
+                "properties": {
+                  "query": {
+                    "type": "string",
+                    "description": "Query required to find a place or address. For example 'largest zoo in Seattle'}"
+                  }
+                },
+                "required": ["tool", "params"]
+              }
+            )
           }
         }
       },
+    
       {
         toolSpec: {
           name: "getBookingDetails",
