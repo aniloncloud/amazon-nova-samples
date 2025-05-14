@@ -69,7 +69,7 @@ class S2sEvent {
                     "description": "Query required to find a place or address. For example 'largest zoo in Seattle'}"
                   }
                 },
-                "required": ["tool", "params"]
+                "required": ["query"]
               }
             )
           }
