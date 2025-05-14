@@ -6,8 +6,6 @@ import uuid
 from s2s_events import S2sEvent
 import bedrock_knowledge_bases as kb
 import time
-import inline_agent  # Updated to use InlineAgent
-from booking import booking_lambda
 from aws_sdk_bedrock_runtime.client import BedrockRuntimeClient, InvokeModelWithBidirectionalStreamOperationInput
 from aws_sdk_bedrock_runtime.models import InvokeModelWithBidirectionalStreamInputChunk, BidirectionalInputPayloadPart
 from aws_sdk_bedrock_runtime.config import Config, HTTPAuthSchemeResolver, SigV4AuthScheme
