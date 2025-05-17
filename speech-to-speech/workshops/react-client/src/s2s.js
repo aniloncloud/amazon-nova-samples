@@ -91,7 +91,7 @@ class S2sChatBot extends React.Component {
 
     playNext() {
         try{
-            if (this.isPlaying || this.audioQueue.length === 0) return;
+            if (this.state.isPlaying || this.audioQueue.length === 0) return;
         
             if (this.audioPlayerRef.current && this.audioQueue.length > 0) {
                 let audioUrl  = this.audioQueue.shift();
@@ -100,21 +100,35 @@ class S2sChatBot extends React.Component {
                 try {
                     this.audioPlayerRef.current.src = audioUrl;
                     this.audioPlayerRef.current.load();  // Reload the audio element to apply the new src
-                    this.setState({audioPlayPromise: this.audioPlayerRef.current.play()}); 
+                    const playPromise = this.audioPlayerRef.current.play();
+                    if (playPromise !== undefined) {
+                        playPromise.then(() => {
+                            // Playback started successfully
+                        }).catch((error) => {
+                            // Playback was interrupted or failed
+                            this.setState({ isPlaying: false, audioPlayPromise: null });
+                        });
+                        this.setState({audioPlayPromise: playPromise});
+                    }
                 }
                 catch(err) {
                     console.log(err);
+                    this.setState({ isPlaying: false, audioPlayPromise: null });
                 }
                 
                 // Wait for the audio to finish, then play the next one
                 this.audioPlayerRef.current.onended = () => {
-                    this.setState({ isPlaying: false});
+                    this.setState({ isPlaying: false, audioPlayPromise: null });
                     this.playNext();
+                };
+                this.audioPlayerRef.current.onpause = () => {
+                    this.setState({ isPlaying: false, audioPlayPromise: null });
                 };
             }
         }
         catch (error) {
             console.log(error);
+            this.setState({ isPlaying: false, audioPlayPromise: null });
         }
     }
     handleIncomingMessage (message) {
