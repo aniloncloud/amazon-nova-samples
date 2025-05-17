@@ -198,6 +198,21 @@ async def invoke_agent(query: str) -> str:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, orchestrator.invoke, query)
 
+async def cleanup_agent() -> None:
+    """Clean up the orchestrator resources and reset the global instance."""
+    global _orchestrator
+    logger.info("Cleaning up inline agent resources")
+    try:
+        with _orchestrator_lock:
+            if _orchestrator is not None:
+                # Release any resources if needed
+                logger.info(f"Releasing resources for session: {_orchestrator.session_id}")
+                _orchestrator = None
+                logger.info("Inline agent resources cleaned up successfully")
+    except Exception as e:
+        logger.error(f"Error during inline agent cleanup: {str(e)}", exc_info=True)
+        raise
+
 def main() -> None:
     try:
         agent = InlineAgentOrchestrator()

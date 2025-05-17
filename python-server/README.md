@@ -53,13 +53,13 @@ The following environment variables are used:
 | Variable | Description | Default |
 |----------|-------------|---------|
 | AWS_REGION | AWS Region | us-east-1 |
-| AWS_PROFILE | AWS CLI profile | nova |
+| AWS_PROFILE | AWS CLI profile | set in environment |
 | BOOKING_LAMBDA_ARN | ARN of the booking Lambda function | Set by setup_booking_resources.sh |
 | TABLE_NAME | DynamoDB table name | Bookings |
 | FOUNDATION_MODEL | Bedrock foundation model to use | amazon.nova-lite-v1:0 |
 | HOST | WebSocket server host | 0.0.0.0 |
-| WS_PORT | WebSocket server port | 8765 |
-| HEALTH_PORT | Health check port | 8080 |
+| WS_PORT | WebSocket server port | 8081 |
+| HEALTH_PORT | Health check port | 8082 |
 | LOG_LEVEL | Logging level | INFO |
 
 ## Usage
@@ -74,7 +74,7 @@ source .venv/bin/activate
 ```
 
 Example queries:
-- "Create a booking for John Doe tomorrow at 3pm for carpet cleaning"
+- "Create a booking for John Doe tomorrow at 3pm for examination"
 - "When is John's booking?"
 - "Cancel John's booking"
 

@@ -279,8 +279,18 @@ else
 fi
 
 # Set environment variable for Lambda ARN
+# Create .env.lambda for shell script sourcing (if needed in the future)
 echo "export BOOKING_LAMBDA_ARN=$LAMBDA_ARN" > .env.lambda
-echo "BOOKING_LAMBDA_ARN=$LAMBDA_ARN" >> .env
+
+# Update .env file, avoiding duplicates
+if grep -q "^BOOKING_LAMBDA_ARN=" .env; then
+    # Replace existing entry
+    sed -i.bak "s|^BOOKING_LAMBDA_ARN=.*|BOOKING_LAMBDA_ARN=$LAMBDA_ARN|" .env
+    rm -f .env.bak
+else
+    # Add new entry
+    echo "BOOKING_LAMBDA_ARN=$LAMBDA_ARN" >> .env
+fi
 
 # Clean up temporary files
 rm -rf trust-policy.json dynamodb-policy.json bedrock-trust-policy.json lambda-invoke-policy.json build

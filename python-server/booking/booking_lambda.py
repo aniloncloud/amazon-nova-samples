@@ -1,10 +1,8 @@
 import json
 import logging
-import uuid
 import os
-import traceback
 from http import HTTPStatus
-from booking.booking_db import get_booking_db  # Assume this exists
+from booking.booking_db import get_booking_db
 
 # Configure logging
 logger = logging.getLogger()
@@ -33,7 +31,7 @@ class BookingLambda:
             dict: Response formatted for Bedrock agent.
         """
         try:
-            logger.info(f"Received event: {json.dumps(event)}")
+            logger.info("Received booking request")
             
             # Extract action group, function name, and HTTP method
             action_group = event.get('actionGroup')
@@ -50,7 +48,7 @@ class BookingLambda:
             # Get parameters from both the top-level parameters array and the requestBody
             parameters = self._extract_parameters(event)
             
-            logger.info(f"Action Group: {action_group}, Function: {function}, HTTP Method: {http_method}, Params: {parameters}")
+            logger.info(f"Processing: {function}, Method: {http_method}")
             
             if not function:
                 return self._error_response("No function or apiPath specified in the request")
@@ -60,17 +58,15 @@ class BookingLambda:
             if not handler:
                 return self._error_response(f"Unsupported function: {function}")
             
-            # Call the handler and log the result
-            logger.info(f"Calling handler for function: {function}")
+            # Call the handler
             result = handler(parameters)
-            logger.info(f"Handler result before formatting: {json.dumps(result) if isinstance(result, dict) else result}")
             
             # Format the response for Bedrock agent
             response = self._format_response(action_group, function, result, http_method)
             return response
             
         except Exception as e:
-            logger.error(f"Error handling request: {str(e)}", exc_info=True)
+            logger.error(f"Error handling request: {str(e)}")
             return self._error_response(str(e), HTTPStatus.INTERNAL_SERVER_ERROR)
 
     def _extract_parameters(self, event):
@@ -125,17 +121,11 @@ class BookingLambda:
             dict: List of matching bookings or error.
         """
         customer_name = self._get_param(parameters, 'customer_name')
-        logger.info(f"Finding bookings for customer: '{customer_name}'")
         
         if not customer_name:
-            logger.warning("Missing required parameter: customer_name")
             return {'error': "Missing required parameter: customer_name"}
             
-        result = self.db.find_bookings_by_customer(customer_name)
-        logger.info(f"Find bookings result: {json.dumps(result)}")
-        
-        # Always return the full result object (bookings, count, scanned_count)
-        return result
+        return self.db.find_bookings_by_customer(customer_name)
 
     def createBooking(self, parameters):
         """
@@ -207,12 +197,7 @@ class BookingLambda:
             dict: List of bookings or error.
         """
         limit = int(self._get_param(parameters, 'limit', 10))
-        logger.info(f"Listing all bookings with limit: {limit}")
-        
-        result = self.db.list_bookings(limit)
-        logger.info(f"List bookings result: {json.dumps(result)}")
-        
-        return result
+        return self.db.list_bookings(limit)
 
     # HELPER METHODS
     
@@ -243,11 +228,6 @@ class BookingLambda:
         Returns:
             dict: Formatted response.
         """
-        # Generate a trace ID for debugging
-        trace_id = f"trace-{function}-{uuid.uuid4().hex[:8]}"
-        logger.info(f"[{trace_id}] Formatting response for function: {function}")
-        logger.info(f"[{trace_id}] Raw result from handler: {json.dumps(result) if isinstance(result, dict) else result}")
-        
         # Format according to Bedrock agent's expectations
         if isinstance(result, dict):
             body = json.dumps(result)
@@ -255,7 +235,7 @@ class BookingLambda:
             body = result
             
         # Create response in the exact format Bedrock expects
-        response = {
+        return {
             "messageVersion": "1.0",
             "response": {
                 "actionGroup": action_group,
@@ -269,10 +249,6 @@ class BookingLambda:
                 }
             }
         }
-            
-        logger.info(f"[{trace_id}] Final formatted response: {json.dumps(response)}")
-        logger.info(f"[{trace_id}] Final response body: {body}")
-        return response
 
     def _error_response(self, message, code=HTTPStatus.BAD_REQUEST):
         """
@@ -285,12 +261,11 @@ class BookingLambda:
         Returns:
             dict: Error response.
         """
-        error_id = uuid.uuid4().hex[:8]
-        logger.error(f"[error-{error_id}] {message}")
+        logger.error(f"Error: {message}")
         
         return {
             'statusCode': code,
-            'body': json.dumps({'error': message, 'error_id': error_id})
+            'body': json.dumps({'error': message})
         }
 
 
@@ -311,12 +286,11 @@ def lambda_handler(event, context):
     try:
         return booking_lambda.handle_request(event)
     except Exception as e:
-        logger.error(f"Unhandled exception in lambda_handler: {str(e)}", exc_info=True)
+        logger.error(f"Unhandled exception in lambda_handler: {str(e)}")
         return {
             'statusCode': 500,
             'body': json.dumps({
                 'error': 'Internal server error',
-                'error_id': uuid.uuid4().hex[:8],
                 'message': str(e)
             })
         }
