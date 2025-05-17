@@ -1,0 +1,139 @@
+diff --git a/speech-to-speech/workshops/python-server/requirements.txt b/speech-to-speech/workshops/python-server/requirements.txt
+index fc0d074..36ddcbc 100644
+--- a/speech-to-speech/workshops/python-server/requirements.txt
++++ b/speech-to-speech/workshops/python-server/requirements.txt
+@@ -5,4 +5,5 @@ rx==3.2.0
+ websockets==15.0.1
+ aws_sdk_bedrock_runtime
+ python-dotenv==1.0.1
+-mcp==1.8.1
+\ No newline at end of file
++mcp==1.8.1
++uvx==2.5.1
+diff --git a/speech-to-speech/workshops/python-server/s2s_session_manager.py b/speech-to-speech/workshops/python-server/s2s_session_manager.py
+index f1bee01..c695a1e 100644
+--- a/speech-to-speech/workshops/python-server/s2s_session_manager.py
++++ b/speech-to-speech/workshops/python-server/s2s_session_manager.py
+@@ -6,6 +6,8 @@ import uuid
+ from s2s_events import S2sEvent
+ import bedrock_knowledge_bases as kb
+ import time
++import inline_agent  # Updated to use InlineAgent
++from booking import booking_lambda
+ from aws_sdk_bedrock_runtime.client import BedrockRuntimeClient, InvokeModelWithBidirectionalStreamOperationInput
+ from aws_sdk_bedrock_runtime.models import InvokeModelWithBidirectionalStreamInputChunk, BidirectionalInputPayloadPart
+ from aws_sdk_bedrock_runtime.config import Config, HTTPAuthSchemeResolver, SigV4AuthScheme
+diff --git a/speech-to-speech/workshops/python-server/server.py b/speech-to-speech/workshops/python-server/server.py
+index 9e1b880..2c1bab8 100644
+--- a/speech-to-speech/workshops/python-server/server.py
++++ b/speech-to-speech/workshops/python-server/server.py
+@@ -8,6 +8,10 @@ import argparse
+ import http.server
+ import threading
+ import os
++from dotenv import load_dotenv
++
++# Load environment variables from .env file
++load_dotenv()
+ from http import HTTPStatus
+ from mcp_client import McpLocationClient
+ 
+@@ -243,4 +247,4 @@ if __name__ == "__main__":
+                 traceback.print_exc()
+         finally:
+             if MCP_CLIENT:
+-                MCP_CLIENT.cleanup()
+\ No newline at end of file
++                MCP_CLIENT.cleanup()
+diff --git a/speech-to-speech/workshops/python-server/workshop-setup.sh b/speech-to-speech/workshops/python-server/workshop-setup.sh
+index 0060a4b..148ff40 100755
+--- a/speech-to-speech/workshops/python-server/workshop-setup.sh
++++ b/speech-to-speech/workshops/python-server/workshop-setup.sh
+@@ -1,17 +1,79 @@
+-# This is only required by the instructor-led workshop
+ #!/bin/bash
++# Workshop setup script for speech-to-speech Python server
++
++# Exit on error
++set -e
++
++echo "Starting Speech-to-Speech workshop setup..."
++
++# Check Python version
++python_version=$(python3 --version 2>&1 | cut -d' ' -f2)
++echo "Detected Python version: $python_version"
++required_version="3.9"
++
++if [[ "$(printf '%s\n' "$required_version" "$python_version" | sort -V | head -n1)" != "$required_version" ]]; then
++    echo "Error: Python version must be at least $required_version"
++    exit 1
++fi
++
++# Set AWS profile to nova
++export AWS_PROFILE=112
++echo "Using AWS profile: $AWS_PROFILE"
++
++# Check if AWS CLI is installed and configured
++if ! command -v aws &> /dev/null; then
++    echo "Error: AWS CLI is not installed. Please install it first."
++    exit 1
++fi
++
++# Verify AWS credentials
++echo "Verifying AWS credentials..."
++if ! aws sts get-caller-identity &> /dev/null; then
++    echo "Error: AWS credentials not configured. Please run 'aws configure' first."
++    exit 1
++fi
+ 
+ # Start virtual environment
+-python3 -m venv .venv
++echo "Setting up Python virtual environment..."
++if [ ! -d ".venv" ]; then
++    python3 -m venv .venv
++fi
+ source .venv/bin/activate
+ 
++# Install dependencies
++echo "Installing dependencies..."
+ pip install --upgrade pip
+-
+-# install dependencies
+ pip install -r requirements.txt
+-
+ curl -LsSf https://astral.sh/uv/install.sh | sh
+ 
+-# Set websocket server host and port
+-export HOST="0.0.0.0"
+-export WS_PORT=8081
++# Set up .env file with default values
++echo "Setting up environment variables..."
++cat > .env << EOF
++# AWS Configuration
++AWS_REGION=us-east-1
++AWS_PROFILE=112
++
++# Server Configuration
++HOST=0.0.0.0
++WS_PORT=8081
++HEALTH_PORT=8082
++
++# Logging Configuration
++LOG_LEVEL=INFO
++
++# Other defaults will be set by setup_booking_resources.sh
++EOF
++
++echo "Environment configuration created in .env file"
++
++# Run booking resources setup
++echo "Setting up booking resources..."
++./setup_booking_resources.sh
++
++# Final instructions
++echo ""
++echo "Setup complete! You can now run:"
++echo "  - ./run_inline_agent.sh - To test the inline agent with a query"
++echo "  - python server.py - To start the websocket server"
++echo ""
++echo "Note: Always activate the virtual environment with 'source .venv/bin/activate' before running scripts."
