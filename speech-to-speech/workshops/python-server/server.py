@@ -8,6 +8,10 @@ import argparse
 import http.server
 import threading
 import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 from http import HTTPStatus
 from mcp_client import McpLocationClient
 
