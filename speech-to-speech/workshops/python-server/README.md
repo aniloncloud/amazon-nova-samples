@@ -11,10 +11,10 @@ The system consists of the following components:
 3. **DynamoDB** - Stores booking data
 4. **WebSocket Server** - Provides real-time communication for the speech interface
 5. **Strands Agent Integration** - Added support for Strands-based agents as an alternative to the MCP client
+6. **Knowledge Base Integration** - Supports retrieving information from Bedrock Knowledge Base
 
 ### Components
 
-- `bedrock_agent.py` - Bedrock agent integration
 - `inline_agent.py` - Inline agent orchestrator using Claude/Bedrock
 - `booking/booking_lambda.py` - Lambda function handler for booking operations
 - `booking/booking_db.py` - DynamoDB data access layer
@@ -23,7 +23,7 @@ The system consists of the following components:
 - `setup_booking_resources.sh` - Script to set up AWS resources
 - `run_inline_agent.sh` - Script to run the inline agent
 - `workshop-setup.sh` - Setup script for the workshop
-- `booking/booking_action_group.py` - (deprecated) Booking action group definition
+- `bedrock_knowledge_bases.py` - Knowledge base integration
 
 ## Prerequisites
 
@@ -64,6 +64,41 @@ echo "AWS_SECRET_ACCESS_KEY=your_secret_key" >> .env
 echo "AWS_SESSION_TOKEN=your_session_token" >> .env  # if needed
 ```
 
+## Knowledge Base Setup
+
+To set up and use a knowledge base with the system:
+
+1. Create a knowledge base in AWS Bedrock:
+
+```bash
+# Create a knowledge base using AWS CLI
+aws bedrock create-knowledge-base \
+  --name "BookingKnowledgeBase" \
+  --description "Knowledge base for booking information" \
+  --storage-configuration "type=OPENSEARCH"
+```
+
+2. Configure the knowledge base in your .env file:
+
+```bash
+echo "KNOWLEDGE_BASE_ID=your_knowledge_base_id" >> .env
+echo "KNOWLEDGE_BASE_DATA_SOURCE_ID=your_data_source_id" >> .env
+```
+
+3. Add documents to your knowledge base:
+
+```bash
+# Upload documents to S3
+aws s3 cp ./knowledge_docs/ s3://your-bucket/knowledge_docs/ --recursive
+
+# Create a data source that points to your S3 location
+aws bedrock create-data-source \
+  --knowledge-base-id your_knowledge_base_id \
+  --name "BookingDataSource" \
+  --description "Data source for booking knowledge" \
+  --data-source-configuration "type=S3,s3Configuration={bucketName=your-bucket,prefix=knowledge_docs/}"
+```
+
 ## Environment Variables
 
 The following environment variables are used:
@@ -74,7 +109,7 @@ The following environment variables are used:
 | AWS_PROFILE | AWS CLI profile | set in environment |
 | AWS_ACCESS_KEY_ID | AWS access key | required |
 | AWS_SECRET_ACCESS_KEY | AWS secret key | required |
-| AWS_SESSION_TOKEN | AWS session token | optional, for temporary credentials |
+| AWS_SESSION_TOKEN | AWS session token | required, for Nova Sonic integration |
 | BOOKING_LAMBDA_ARN | ARN of the booking Lambda function | Set by setup_booking_resources.sh |
 | TABLE_NAME | DynamoDB table name | Bookings |
 | FOUNDATION_MODEL | Bedrock foundation model to use | amazon.nova-lite-v1:0 |
@@ -82,6 +117,8 @@ The following environment variables are used:
 | WS_PORT | WebSocket server port | 8081 |
 | HEALTH_PORT | Health check port | 8082 |
 | LOG_LEVEL | Logging level | INFO |
+| KNOWLEDGE_BASE_ID | ID of the Bedrock Knowledge Base | required for KB features |
+| KNOWLEDGE_BASE_DATA_SOURCE_ID | ID of the KB data source | required for KB features |
 
 ## Usage
 
@@ -116,6 +153,7 @@ Example queries:
 - "Create a booking for John Doe tomorrow at 3pm for examination"
 - "When is John's booking?"
 - "Cancel John's booking"
+- "What are your cancellation policies?" (uses Knowledge Base)
 
 ### Direct API Operations
 
@@ -149,6 +187,7 @@ The Booking API supports the following operations:
 - **Environment variable issues**: Ensure the `.env` file is properly sourced in your shell
 - **Agent selection errors**: Make sure to use `--agent mcp` or `--agent strands` when using those integrations
 - **AWS credential errors**: Check that AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are set correctly
+- **Knowledge Base errors**: Verify your knowledge base is correctly set up and the IDs are properly configured in your environment
 
 ### Logs
 
