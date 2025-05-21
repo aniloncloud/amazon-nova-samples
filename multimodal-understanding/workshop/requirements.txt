@@ -8,3 +8,5 @@ pickleshare
 retrying
 Pillow
 pandas
+strands-agents
+strands-agents-tools

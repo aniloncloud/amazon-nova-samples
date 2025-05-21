@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 load_dotenv()
 from http import HTTPStatus
 from mcp_client import McpLocationClient
+from strands_agent import StrandsAgent
 
 # Configure logging
 LOGLEVEL = os.environ.get("LOGLEVEL", "INFO").upper()
@@ -31,6 +32,7 @@ def debug_print(message):
         print(message)
 
 MCP_CLIENT = None
+STRANDS_AGENT = None
 
 class HealthCheckHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
@@ -111,7 +113,7 @@ async def websocket_handler(websocket):
 
                         """Handle WebSocket connections from the frontend."""
                         # Create a new stream manager for this connection
-                        stream_manager = S2sSessionManager(model_id='amazon.nova-sonic-v1:0', region='us-east-1', mcp_client=MCP_CLIENT)
+                        stream_manager = S2sSessionManager(model_id='amazon.nova-sonic-v1:0', region='us-east-1', mcp_client=MCP_CLIENT, strands_agent=STRANDS_AGENT)
                         
                         # Initialize the Bedrock stream
                         await stream_manager.initialize_stream()
@@ -186,7 +188,7 @@ async def forward_responses(websocket, stream_manager):
         stream_manager.close()
 
 
-async def main(host, port, health_port):
+async def main(host, port, health_port, enable_mcp=False, enable_strands_agent=False):
 
     if health_port:
         try:
@@ -195,12 +197,23 @@ async def main(host, port, health_port):
             print("Failed to start health check endpoint",ex)
     
     # Init MCP client
-    try:
-        global MCP_CLIENT
-        MCP_CLIENT = McpLocationClient()
-        await MCP_CLIENT.connect_to_server()
-    except Exception as ex:
-        print("Failed to start MCP client",ex)
+    if enable_mcp:
+        print("MCP enabled")
+        try:
+            global MCP_CLIENT
+            MCP_CLIENT = McpLocationClient()
+            await MCP_CLIENT.connect_to_server()
+        except Exception as ex:
+            print("Failed to start MCP client",ex)
+    
+    # Init Strands Agent
+    if enable_strands_agent:
+        print("Strands agent enabled")
+        try:
+            global STRANDS_AGENT
+            STRANDS_AGENT = StrandsAgent()
+        except Exception as ex:
+            print("Failed to start MCP client",ex)
 
     """Main function to run the WebSocket server."""
     try:
@@ -217,13 +230,9 @@ if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(description='Nova S2S WebSocket Server')
+    parser.add_argument('--agent', type=str, help='Agent intergation "mcp" or "strands".')
     parser.add_argument('--debug', action='store_true', help='Enable debug mode')
     args = parser.parse_args()
-
-    # Environment variables required for host and ports: 
-    # HOST: for both websocket and health check
-    # WS_PORT: websocket port. 8081
-    # HEALTH_PORT (optional): health check HTTP port. 8082
 
     host, port, health_port = None, None, None
     if os.getenv("HOST"):
@@ -233,11 +242,14 @@ if __name__ == "__main__":
     if os.getenv("HEALTH_PORT"):
         health_port = int(os.getenv("HEALTH_PORT"))
 
+    enable_mcp = args.agent == "mcp"
+    enable_strands = args.agent == "strands"
+
     if not host or not port:
         print(f"HOST and PORT are required. Received HOST: {host}, PORT: {port}")
     else:
         try:
-            asyncio.run(main(host, port, health_port))
+            asyncio.run(main(host, port, health_port, enable_mcp, enable_strands))
         except KeyboardInterrupt:
             print("Server stopped by user")
         except Exception as e:
