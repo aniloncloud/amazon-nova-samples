@@ -47,6 +47,23 @@ This will:
 - Set up environment variables
 - Create AWS resources (Lambda function, DynamoDB table, etc.)
 
+3. Set up AWS credentials:
+
+```bash
+# Option 1: Set environment variables directly
+export AWS_ACCESS_KEY_ID=your_access_key
+export AWS_SECRET_ACCESS_KEY=your_secret_key
+export AWS_SESSION_TOKEN=your_session_token  # if using temporary credentials
+
+# Option 2: Use AWS CLI to configure credentials
+aws configure
+
+# Option 3: Add to your .env file
+echo "AWS_ACCESS_KEY_ID=your_access_key" >> .env
+echo "AWS_SECRET_ACCESS_KEY=your_secret_key" >> .env
+echo "AWS_SESSION_TOKEN=your_session_token" >> .env  # if needed
+```
+
 ## Environment Variables
 
 The following environment variables are used:
@@ -55,6 +72,9 @@ The following environment variables are used:
 |----------|-------------|---------|
 | AWS_REGION | AWS Region | us-east-1 |
 | AWS_PROFILE | AWS CLI profile | set in environment |
+| AWS_ACCESS_KEY_ID | AWS access key | required |
+| AWS_SECRET_ACCESS_KEY | AWS secret key | required |
+| AWS_SESSION_TOKEN | AWS session token | optional, for temporary credentials |
 | BOOKING_LAMBDA_ARN | ARN of the booking Lambda function | Set by setup_booking_resources.sh |
 | TABLE_NAME | DynamoDB table name | Bookings |
 | FOUNDATION_MODEL | Bedrock foundation model to use | amazon.nova-lite-v1:0 |
@@ -128,6 +148,7 @@ The Booking API supports the following operations:
 - **Missing Lambda ARN**: Run `setup_booking_resources.sh` to create and configure the Lambda function
 - **Environment variable issues**: Ensure the `.env` file is properly sourced in your shell
 - **Agent selection errors**: Make sure to use `--agent mcp` or `--agent strands` when using those integrations
+- **AWS credential errors**: Check that AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are set correctly
 
 ### Logs
 
