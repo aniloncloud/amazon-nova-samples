@@ -13,6 +13,7 @@ This directory contains scripts and templates for deploying the booking system r
 1. AWS CLI installed and configured
 2. AWS profile with appropriate permissions
 3. S3 bucket for storing Lambda code
+4. For Strands integration: Strands agent package installed (`strands-agents` in requirements.txt)
 
 ## Usage
 
@@ -46,6 +47,13 @@ This script will:
 - Deploy the CloudFormation stack with all required resources
 - Retrieve the Lambda ARN from the stack outputs
 - Update the environment files with the Lambda ARN
+
+## Agent Integration Options
+
+The system now supports two agent integration options:
+
+1. **MCP Client**: Traditional location-based integration (use `--agent mcp` flag with server.py)
+2. **Strands Agent**: Advanced agents framework (use `--agent strands` flag with server.py)
 
 ## Resources Created
 

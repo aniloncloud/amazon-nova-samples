@@ -10,6 +10,7 @@ The system consists of the following components:
 2. **Lambda Function** - Handles booking operations and interfaces with DynamoDB
 3. **DynamoDB** - Stores booking data
 4. **WebSocket Server** - Provides real-time communication for the speech interface
+5. **Strands Agent Integration** - Added support for Strands-based agents as an alternative to the MCP client
 
 ### Components
 
@@ -18,7 +19,7 @@ The system consists of the following components:
 - `booking/booking_lambda.py` - Lambda function handler for booking operations
 - `booking/booking_db.py` - DynamoDB data access layer
 - `booking/booking_openapi.json` - OpenAPI schema for the booking API
-- `server.py` - WebSocket server for real-time communication
+- `server.py` - WebSocket server for real-time communication with Strands and MCP integration
 - `setup_booking_resources.sh` - Script to set up AWS resources
 - `run_inline_agent.sh` - Script to run the inline agent
 - `workshop-setup.sh` - Setup script for the workshop
@@ -64,6 +65,24 @@ The following environment variables are used:
 
 ## Usage
 
+### Running the WebSocket Server
+
+To start the WebSocket server:
+
+```bash
+source .venv/bin/activate
+python server.py
+```
+
+For agent integration, use the `--agent` flag:
+```bash
+# To enable MCP client
+python server.py --agent mcp
+
+# To enable Strands agent
+python server.py --agent strands
+```
+
 ### Testing the Inline Agent
 
 To test the agent with a query:
@@ -77,15 +96,6 @@ Example queries:
 - "Create a booking for John Doe tomorrow at 3pm for examination"
 - "When is John's booking?"
 - "Cancel John's booking"
-
-### Running the WebSocket Server
-
-To start the WebSocket server:
-
-```bash
-source .venv/bin/activate
-python server.py
-```
 
 ### Direct API Operations
 
@@ -117,6 +127,7 @@ The Booking API supports the following operations:
 - **Authentication errors**: Ensure AWS credentials are configured correctly with `aws configure`
 - **Missing Lambda ARN**: Run `setup_booking_resources.sh` to create and configure the Lambda function
 - **Environment variable issues**: Ensure the `.env` file is properly sourced in your shell
+- **Agent selection errors**: Make sure to use `--agent mcp` or `--agent strands` when using those integrations
 
 ### Logs
 
@@ -136,7 +147,7 @@ The Booking API supports the following operations:
 Run the Lambda function locally:
 
 ```bash
-python -c "from booking/booking_lambda import lambda_handler; print(lambda_handler({'apiPath': '/listBookings'}, {}))"
+python -c "from booking.booking_lambda import lambda_handler; print(lambda_handler({'apiPath': '/listBookings'}, {}))"
 ```
 
 ## Security Considerations
